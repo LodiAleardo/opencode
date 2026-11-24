@@ -1,6 +1,6 @@
 import type { ProjectListOutput, SessionInfo } from "@opencode/client/promise"
 import { createMemoryHistory, MemoryRouter, Route } from "@solidjs/router"
-import { createEffect, on, Show } from "solid-js"
+import { createEffect, createSignal, on, Show } from "solid-js"
 import {
   createMemoryStorage,
   createStoryFetch,
@@ -14,6 +14,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 import { useGlobal } from "@/runtime/server/runtime"
 import { tabHref, tabKey, useTabs, type Tab } from "@/shell/tabs/tabs"
 import { createRouteTabSync } from "./route-sync"
+import { createSideTabFork } from "./side-tab-fork"
 import { SidebarCustomized, type SidebarStripGrouping } from "./sidebar-customized"
 import type { SidebarViewState } from "./sidebar-view"
 import { TitlebarTabStrip } from "./tab-strip"
@@ -54,7 +55,7 @@ const sessions = [
 
 // All fetches and writes belong to one mount. The rest of the server (including the event stream)
 // comes from the same fixture the standalone dialog stories use.
-function navigationFetch(): typeof fetch {
+function navigationFetch(onFork: () => void): typeof fetch {
   const fallback = createStoryFetch()
 
   const records = new Map(sessions.map((item) => [item.id, structuredClone(item)]))
@@ -75,11 +76,25 @@ function navigationFetch(): typeof fetch {
     const match = /^\/api\/session\/(ses_[^/]+)(?:\/(\w+))?$/.exec(url.pathname)
 
     if (!match) return fallback(input, init)
+
+    if (match[2] === "fork" && request.method === "POST") {
+      onFork()
+
+      return fallback(input, init)
+    }
+
     const record = records.get(match[1])
 
     if (!record) return new Response(null, { status: 404 })
 
-    if (match[2] === "message") return Response.json({ data: [], cursor: {} })
+    if (match[2] === "message")
+      return Response.json({
+        data:
+          record.id === "ses_sidebar"
+            ? [{ id: "msg_story", type: "user", text: "Improve keyboard navigation", time: { created: idle } }]
+            : [],
+        cursor: {},
+      })
 
     if (match[2] === "view") record.time.viewed = record.time.idle
 
@@ -99,9 +114,10 @@ function navigationFetch(): typeof fetch {
   return Object.assign(handler, { preconnect: fallback.preconnect })
 }
 
-type Preset = "sessions" | "draft" | "crowded" | "projects" | "collapsed"
+type Preset = "sessions" | "draft" | "crowded" | "projects" | "collapsed" | "forks"
 
 export function NavigationStory(props: { preset: Preset; width: number }) {
+  const [forkRequests, setForkRequests] = createSignal(0)
   const draft: Tab = { type: "draft", server, directory: STORY_DIRECTORY, draftID: "navigation-draft" }
 
   const open = props.preset === "crowded" ? sessions : sessions.slice(0, 4)
@@ -127,7 +143,7 @@ export function NavigationStory(props: { preset: Preset; width: number }) {
     notify: async () => {},
     restart: async () => {},
     storage,
-    fetch: navigationFetch(),
+    fetch: navigationFetch(() => setForkRequests((count) => count + 1)),
   }
 
   const history = createMemoryHistory()
@@ -141,8 +157,12 @@ export function NavigationStory(props: { preset: Preset; width: number }) {
           <DialogStoryRuntime platform={platform}>
             <NavigationSurface
               sidebar={props.preset === "projects" || props.preset === "collapsed"}
+              forks={props.preset === "forks"}
               width={props.width}
             />
+            <Show when={props.preset === "forks"}>
+              <output aria-label="Fork requests">Fork requests: {forkRequests()}</output>
+            </Show>
           </DialogStoryRuntime>
         )}
       />
@@ -150,12 +170,13 @@ export function NavigationStory(props: { preset: Preset; width: number }) {
   )
 }
 
-function NavigationSurface(props: { sidebar: boolean; width: number }) {
+function NavigationSurface(props: { sidebar: boolean; forks: boolean; width: number }) {
   const tabs = useTabs()
 
   const route = createRouteTabSync()
 
   const global = useGlobal()
+  const fork = createSideTabFork()
 
   createEffect(
     on(route.currentTab, (current) => {
@@ -165,10 +186,11 @@ function NavigationSurface(props: { sidebar: boolean; width: number }) {
 
   const strip = (group?: SidebarStripGrouping) => (
     <TitlebarTabStrip
-      orientation={props.sidebar ? "vertical" : "horizontal"}
+      orientation={props.sidebar || props.forks ? "vertical" : "horizontal"}
       sections={group?.sections}
       tabFooter={group?.tabFooter}
       tabLabel={group?.tabLabel}
+      sideTabFork={props.forks ? fork : undefined}
       tabs={tabs.store}
       currentTab={route.currentTab()}
       onNavigate={(tab, element) => {
@@ -183,7 +205,7 @@ function NavigationSurface(props: { sidebar: boolean; width: number }) {
 
   return (
     <Show
-      when={props.sidebar}
+      when={props.sidebar || props.forks}
       fallback={
         <div class="max-w-full rounded-md bg-v2-background-bg-deep p-1" style={{ width: `${props.width}px` }}>
           {strip()}
@@ -195,12 +217,14 @@ function NavigationSurface(props: { sidebar: boolean; width: number }) {
         class="flex h-[440px] max-w-full flex-col rounded-md bg-v2-background-bg-deep p-2"
         style={{ width: `${props.width}px` }}
       >
-        <SidebarCustomized
-          currentTab={route.currentTab()}
-          onNewSession={() => void tabs.newDraft({ server, directory: STORY_DIRECTORY })}
-        >
-          {strip}
-        </SidebarCustomized>
+        <Show when={props.sidebar} fallback={strip()}>
+          <SidebarCustomized
+            currentTab={route.currentTab()}
+            onNewSession={() => void tabs.newDraft({ server, directory: STORY_DIRECTORY })}
+          >
+            {strip}
+          </SidebarCustomized>
+        </Show>
       </div>
     </Show>
   )

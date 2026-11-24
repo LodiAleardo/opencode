@@ -42,6 +42,7 @@ import { RecentlyClosedTabsMenu } from "./recently-closed-tabs-menu"
 import { useSettingsCommand, useSettingsDialog } from "@/settings/command"
 import { TitlebarItems, useTitlebarItems } from "@/runtime/plugin/titlebar-items"
 import { createRouteTabSync } from "./route-sync"
+import { createSideTabFork } from "./side-tab-fork"
 import {
   INITIAL_MOBILE_TABS_STATE,
   selectMobileTabsOpen,
@@ -370,6 +371,11 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
 
             const toggleHome = () => tabs.toggleHome({ home: layout.route().type === "home", current: currentTab() })
 
+            const sideTabFork = platform.platform === "desktop" ? createSideTabFork() : undefined
+
+            const desktopSideTabFork = () =>
+              settings.appearance.tabLayout() === "vertical" && settings.general.sideTabForks() ? sideTabFork : undefined
+
             const verticalTabStrip = (
               highlightActive?: () => boolean,
               onNavigate?: () => void,
@@ -383,6 +389,9 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                 tabLabel={grouped?.tabLabel}
                 tabMenu={grouped?.tabMenu}
                 tabMuted={grouped?.tabMuted}
+                tabDepth={grouped?.tabDepth}
+                tabTitle={grouped?.tabTitle}
+                sideTabFork={desktopSideTabFork()}
                 leading={grouped?.leading}
                 tabs={tabsStore}
                 currentTab={currentTab()}
@@ -706,6 +715,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                   const pinnedVerticalStrip = () => (
                     <TitlebarTabStrip
                       orientation="vertical"
+                      sideTabFork={desktopSideTabFork()}
                       leading={pinnedSide()}
                       hidden={pins.holds}
                       tabContextMenu={pinMenu}
@@ -731,6 +741,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                     <Show when={tabGroupsEnabled()} fallback={verticalTabStrip()}>
                       <TitlebarTabStrip
                         orientation="vertical"
+                        sideTabFork={desktopSideTabFork()}
                         sections={verticalSections()}
                         customVerticalDrag={tabGroups.dragBinding}
                         tabContextMenu={
@@ -1029,7 +1040,11 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                                         <SidebarInbox />
                                       </Match>
                                       <Match when={settings.general.sidebarOrganize() === "customize"}>
-                                        <SidebarCustomized currentTab={currentTab()} onNewSession={openNewTab}>
+                                        <SidebarCustomized
+                                          currentTab={currentTab()}
+                                          onNewSession={openNewTab}
+                                          sideTabFork={desktopSideTabFork()}
+                                        >
                                           {(grouped) => verticalTabStrip(undefined, undefined, grouped)}
                                         </SidebarCustomized>
                                       </Match>

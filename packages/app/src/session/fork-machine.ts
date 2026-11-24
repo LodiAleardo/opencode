@@ -23,7 +23,7 @@ export type SessionForkState =
       readonly attempt: number
       readonly sessionID: string
       readonly messageID: string
-      readonly draft: SessionForkDraft
+      readonly draft?: SessionForkDraft
     }
   | { readonly status: "closed"; readonly surface: SessionForkSurface; readonly attempt: number }
 
@@ -32,7 +32,7 @@ export type SessionForkEvent =
       readonly type: "fork.requested"
       readonly sessionID: string
       readonly messageID: string
-      readonly draft: SessionForkDraft
+      readonly draft?: SessionForkDraft
     }
   | { readonly type: "fork.succeeded"; readonly attempt: number; readonly session: SessionInfo }
   | { readonly type: "fork.failed"; readonly attempt: number; readonly message: string }
@@ -56,7 +56,7 @@ export type SessionForkEffect =
       readonly type: "fork.open"
       readonly attempt: number
       readonly session: SessionInfo
-      readonly draft: SessionForkDraft
+      readonly draft?: SessionForkDraft
     }
   | { readonly type: "fork.fail"; readonly attempt: number; readonly message?: string }
   | { readonly type: "dialog.close" }

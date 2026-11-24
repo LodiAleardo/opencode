@@ -57,6 +57,8 @@ import {
   type TabHintsEvent,
 } from "./tab-hints-machine"
 import type { SessionInfo } from "@opencode/client/promise"
+import { forkTitles, forkTree } from "./fork-tree"
+import { SideTabForkItem, type createSideTabFork } from "./side-tab-fork"
 
 const IS_MAC = typeof navigator !== "undefined" && /(Mac|iPod|iPhone|iPad)/.test(navigator.platform)
 
@@ -81,6 +83,8 @@ function SessionTabSlot(
     group?: string
     footer?: JSX.Element
     label?: string
+    depth?: number
+    displayTitle?: string
     hideAvatar?: boolean
     active: boolean
     orientation: "horizontal" | "vertical"
@@ -94,6 +98,7 @@ function SessionTabSlot(
     fallbackDirectory?: string
     muted?: boolean
     menuItems?: () => JSX.Element
+    forkItem?: JSX.Element
     customDrag?: boolean
     dragSource?: boolean
     offsetY?: number
@@ -141,7 +146,10 @@ function SessionTabSlot(
       data-combine-order={props.combineOrder}
       data-group-color={props.combineColor}
       data-orientation={props.orientation}
-      style={props.offsetY ? { transform: `translate3d(0, ${props.offsetY}px, 0)` } : undefined}
+      style={{
+        transform: props.offsetY ? `translate3d(0, ${props.offsetY}px, 0)` : undefined,
+        "--fork-indent": props.depth ? `${props.depth * 14}px` : undefined,
+      }}
       class="relative flex"
       classList={{
         "w-56 min-w-7 max-w-56 flex-shrink": props.orientation === "horizontal",
@@ -156,6 +164,7 @@ function SessionTabSlot(
         href={tabHref(props.tab)}
         server={props.tab.server}
         session={props.session}
+        displayTitle={props.displayTitle}
         preparing={props.preparing}
         unread={props.unread}
         attention={props.attention}
@@ -167,6 +176,7 @@ function SessionTabSlot(
         fallbackDirectory={props.fallbackDirectory}
         muted={props.muted}
         menuItems={props.menuItems}
+        forkItem={props.forkItem}
         onDelete={props.onDelete}
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
@@ -191,6 +201,8 @@ function SessionTabEntry(
     group?: string
     footer?: JSX.Element
     label?: string
+    depth?: number
+    displayTitle?: string
     hideAvatar?: boolean
     active: boolean
     highlightActive?: boolean
@@ -200,6 +212,7 @@ function SessionTabEntry(
     shortcut?: number
     muted?: boolean
     menuItems?: () => JSX.Element
+    forkItem?: JSX.Element
     customDrag?: boolean
     dragSource?: boolean
     offsetY?: number
@@ -335,10 +348,12 @@ function SessionTabEntry(
         group={props.group}
         footer={props.footer}
         label={props.label}
+        depth={props.depth}
         hideAvatar={props.hideAvatar}
         active={props.active && props.highlightActive !== false}
         orientation={props.orientation}
         session={session()}
+        displayTitle={props.displayTitle}
         preparing={props.view.phase === "preparing"}
         unread={unread()}
         attention={status.attention()}
@@ -355,6 +370,7 @@ function SessionTabEntry(
         fallbackDirectory={props.view.fallbackDirectory}
         muted={props.muted}
         menuItems={props.menuItems}
+        forkItem={props.forkItem}
         customDrag={props.customDrag}
         dragSource={props.dragSource}
         offsetY={props.offsetY}
@@ -622,6 +638,9 @@ export type TabStripSection = {
   key: string
   /** Open tabs shown in this section, in display order. */
   tabs: Tab[]
+  /** Interleaves recent sessions with open tabs when both are part of the same fork tree. */
+  rows?: (Tab | string)[]
+  renderRow?: (key: string) => JSX.Element
   header?: JSX.Element
   footer?: JSX.Element
   /** The header already names the project, so session tabs leave out their project avatar. */
@@ -672,6 +691,9 @@ export function TitlebarTabStrip(props: {
   tabMenu?: (tab: SessionTab) => JSX.Element
   /** Vertical only: whether a session tab is muted, which swaps its unread dot for a muted mark. */
   tabMuted?: (tab: SessionTab) => boolean
+  sideTabFork?: ReturnType<typeof createSideTabFork>
+  tabDepth?: (tab: SessionTab) => number | undefined
+  tabTitle?: (tab: SessionTab) => string | undefined
   /** Rows that share the tabs' shortcuts and are numbered first (e.g. pinned sessions). Side tabs only render `content`. */
   leading?: TabStripLeading
   /** Open tabs shown elsewhere (e.g. pinned), kept in the tab order but not rendered here. */
@@ -686,14 +708,63 @@ export function TitlebarTabStrip(props: {
   const language = useLanguage()
   const appTabs = useTabs()
   const vertical = () => props.orientation === "vertical"
-  const sections = () => (vertical() ? props.sections : undefined)
   const customDrag = () => (vertical() ? props.customVerticalDrag : undefined)
 
-  const displayTabs = createMemo(
-    () =>
-      sections()?.flatMap((section) => section.tabs) ??
-      (props.hidden ? props.tabs.filter((tab) => !props.hidden?.(tab)) : props.tabs),
-  )
+  const layout = createMemo(() => {
+    const depths = new Map<string, number>()
+
+    const order = (tabs: Tab[]) => {
+      if (!props.sideTabFork) return tabs
+
+      const tree = forkTree(tabs, tabKey, (tab) => {
+        if (tab.type !== "session") return
+        const source = global.serverCtx(tab.server)?.data.session.get(tab.sessionId)?.fork?.sessionID
+
+        if (source) return tabKey({ type: "session", server: tab.server, sessionId: source })
+      })
+
+      tree.depths.forEach((depth, key) => depths.set(key, depth))
+
+      return tree.tabs
+    }
+
+    const groups = vertical() ? props.sections : undefined
+
+    if (groups) {
+      const sections =
+        props.tabDepth || !props.sideTabFork ? groups : groups.map((section) => ({ ...section, tabs: order(section.tabs) }))
+
+      return { sections, tabs: sections.flatMap((section) => section.tabs), depths }
+    }
+
+    const tabs = props.hidden ? props.tabs.filter((tab) => !props.hidden?.(tab)) : props.tabs
+
+    return { sections: undefined, tabs: order(tabs), depths }
+  })
+
+  const sections = createMemo(() => layout().sections)
+  const displayTabs = createMemo(() => layout().tabs)
+
+  const forkLabels = createMemo(() => {
+    if (!props.sideTabFork || props.tabTitle) return
+
+    const servers = new Set(
+      displayTabs().flatMap((tab) =>
+        tab.type === "session" && global.serverCtx(tab.server)?.data.session.get(tab.sessionId)?.fork
+          ? [tab.server]
+          : [],
+      ),
+    )
+
+    return new Map(
+      [...servers].map((server) => [
+        server,
+        forkTitles(global.serverCtx(server)?.data.session.known() ?? [], (title, branch) =>
+          language.t("session.tab.forkTitle", { title, branch }),
+        ),
+      ]),
+    )
+  })
 
   const sectionOf = createMemo(
     () => new Map(sections()?.flatMap((section) => section.tabs.map((tab) => [tabKey(tab), section.key] as const))),
@@ -915,6 +986,8 @@ export function TitlebarTabStrip(props: {
           group={group}
           footer={footer()}
           label={label()}
+          depth={props.tabDepth?.(tab) ?? layout().depths.get(id)}
+          displayTitle={props.tabTitle?.(tab) ?? forkLabels()?.get(tab.server)?.get(tab.sessionId)}
           hideAvatar={section?.hideAvatars}
           active={props.currentTab === tab}
           highlightActive={props.highlightActive}
@@ -924,6 +997,11 @@ export function TitlebarTabStrip(props: {
           shortcut={shortcut(visibleIndex())}
           muted={vertical() ? props.tabMuted?.(tab) : undefined}
           menuItems={vertical() && props.tabMenu ? () => props.tabMenu?.(tab) : undefined}
+          forkItem={
+            <Show when={vertical() && props.sideTabFork && views().get(id)?.session}>
+              {(session) => <SideTabForkItem action={props.sideTabFork!} server={tab.server} session={session()} />}
+            </Show>
+          }
           customDrag={!!customDrag()}
           dragSource={customDrag()?.isDraggingTab(id)}
           offsetY={customDrag()?.tabTransformY(id)}
@@ -953,7 +1031,7 @@ export function TitlebarTabStrip(props: {
         label={label()}
         active={props.currentTab === tab && props.highlightActive !== false}
         orientation={vertical() ? "vertical" : "horizontal"}
-        title={language.t("session.tab.session")}
+        title={language.t(tab.fork ? "session.tab.forkDraft" : "session.tab.session")}
         shortcut={shortcut(visibleIndex())}
         customDrag={!!customDrag()}
         dragSource={customDrag()?.isDraggingTab(id)}
@@ -995,7 +1073,12 @@ export function TitlebarTabStrip(props: {
                 fallback={
                   <>
                     {section().header}
-                    <For each={section().tabs}>{(tab) => renderTab(tab, section())}</For>
+                    <For each={section().rows ?? section().tabs}>
+                      {(row) =>
+                        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- strings are recent-row keys, not open tabs
+                        typeof row === "string" ? section().renderRow?.(row) : renderTab(row, section())
+                      }
+                    </For>
                     {section().footer}
                   </>
                 }

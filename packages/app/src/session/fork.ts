@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js"
+import { createEffect, on, type Accessor } from "solid-js"
 import { useNavigate, useParams } from "@solidjs/router"
 import { base64Encode } from "@opencode/util/encode"
 import { useComposerState } from "@/composer/persistence"
@@ -6,16 +6,9 @@ import { extractPromptContext, extractPromptFromMessage } from "@/composer/promp
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
 import { useData, useServer } from "@/runtime/server/current"
-import { showToast } from "@/shell/notifications/toast"
 import { sessionHref } from "@/shell/routes/session"
 import { useWorkspaceLocation } from "@/workspaces/location"
-import {
-  createSessionForkState,
-  selectSessionForkView,
-  transitionSessionFork,
-  type SessionForkEffect,
-  type SessionForkEvent,
-} from "./fork-machine"
+import { createForkAction } from "./fork-action"
 
 export type SessionForkControllerOptions =
   | { readonly surface: "inline" }
@@ -34,75 +27,7 @@ export function createSessionForkController(options: SessionForkControllerOption
   const prompt = useComposerState()
   const language = useLanguage()
   const server = useServer()
-  const [machine, setMachine] = createSignal(createSessionForkState(options.surface))
-
-  const runs = new Map<
-    number,
-    { controller: AbortController; timer: ReturnType<typeof setTimeout>; done: PromiseWithResolvers<boolean> }
-  >()
-
-  const dispatch = (event: SessionForkEvent) => {
-    const next = transitionSessionFork(machine(), event)
-
-    if (next.state !== machine()) setMachine(next.state)
-    next.effects.forEach((effect) =>
-      Promise.try(() => run(effect)).catch((cause: unknown) => console.error("[fork]", cause)),
-    )
-  }
-
-  // Ends the run's bookkeeping; the run's own result arrives later, if at all, and the machine drops it.
-  const settle = (attempt: number, opened: boolean) => {
-    const entry = runs.get(attempt)
-
-    if (!entry) return
-    runs.delete(attempt)
-    clearTimeout(entry.timer)
-    entry.done.resolve(opened)
-
-    return entry
-  }
-
-  const run = (effect: SessionForkEffect) => {
-    if (effect.type === "fork.start") {
-      const controller = new AbortController()
-      runs.set(effect.attempt, {
-        controller,
-        timer: setTimeout(() => dispatch({ type: "fork.timed-out", attempt: effect.attempt }), effect.timeoutMs),
-        done: Promise.withResolvers<boolean>(),
-      })
-      serverSDK.api.session
-        .fork({ sessionID: effect.sessionID, before: effect.messageID }, { signal: controller.signal })
-        .then(
-          (session) => dispatch({ type: "fork.succeeded", attempt: effect.attempt, session }),
-          (cause: unknown) =>
-            dispatch({
-              type: "fork.failed",
-              attempt: effect.attempt,
-              message: cause instanceof Error ? cause.message : String(cause),
-            }),
-        )
-
-      return
-    }
-
-    if (effect.type === "fork.cancel") return settle(effect.attempt, false)?.controller.abort()
-
-    if (effect.type === "fork.open") {
-      data.session.remember(effect.session)
-      const target = prompt.capture({ dir: base64Encode(effect.session.location.directory), id: effect.session.id })
-      target.set(effect.draft.prompt)
-      target.context.replace([...effect.draft.context])
-      navigate(sessionHref(server.key, effect.session.id))
-      settle(effect.attempt, true)
-
-      return
-    }
-
-    if (effect.type === "dialog.close") return options.surface === "dialog" ? options.onClose() : undefined
-
-    settle(effect.attempt, false)
-    showToast({ title: language.t("common.requestFailed"), description: effect.message })
-  }
+  const action = createForkAction(options.surface, options.surface === "dialog" ? options.onClose : undefined)
 
   const fork = (input: { sessionID: string; messageID: string }) => {
     const message = data.session.message.get(input.sessionID, input.messageID)
@@ -112,47 +37,55 @@ export function createSessionForkController(options: SessionForkControllerOption
     // The prompt's paths are relative to the session it was sent in.
     const directory = data.session.get(input.sessionID)?.location.directory ?? location().directory
     const context = extractPromptContext(message, { directory })
-    const before = machine()
 
-    dispatch({
-      type: "fork.requested",
-      sessionID: input.sessionID,
-      messageID: input.messageID,
-      draft: {
-        prompt: extractPromptFromMessage(message, {
-          directory,
-          attachmentName: language.t("common.attachment"),
-          sessionTitle: (id) => data.session.get(id)?.title,
-        }),
-        context: [...context.comments, ...context.files],
-      },
-    })
-    const after = machine()
+    return action
+      .fork(
+        {
+          type: "fork.requested",
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          draft: {
+            prompt: extractPromptFromMessage(message, {
+              directory,
+              attachmentName: language.t("common.attachment"),
+              sessionTitle: (id) => data.session.get(id)?.title,
+            }),
+            context: [...context.comments, ...context.files],
+          },
+        },
+        (sessionID, before, signal) => serverSDK.api.session.fork({ sessionID, before }, { signal }),
+        (session, draft) => {
+          data.session.remember(session)
 
-    if (after === before || after.status !== "forking") return Promise.resolve(false)
+          if (draft) {
+            const target = prompt.capture({ dir: base64Encode(session.location.directory), id: session.id })
+            target.set(draft.prompt)
+            target.context.replace([...draft.context])
+          }
 
-    return runs.get(after.attempt)?.done.promise ?? Promise.resolve(false)
+          navigate(sessionHref(server.key, session.id))
+        },
+      )
+      .then(Boolean)
   }
 
   createEffect(
     on(
       () => params.id,
-      () => dispatch({ type: "session.changed" }),
+      () => action.dispatch({ type: "session.changed" }),
       { defer: true },
     ),
   )
 
   if (options.surface === "dialog") {
     createEffect(() => {
-      if (options.closing()) dispatch({ type: "disposed" })
+      if (options.closing()) action.dispatch({ type: "disposed" })
     })
   }
 
-  onCleanup(() => dispatch({ type: "disposed" }))
-
   return {
     fork,
-    view: () => selectSessionForkView(machine()),
+    view: action.view,
   }
 }
 

@@ -45,6 +45,7 @@ import { SessionInbox } from "@opencode/core/session/inbox"
 import { SessionMessage } from "@opencode/core/session/message"
 import { SessionModelTransport } from "@opencode/core/session/model-transport"
 import { Money } from "@opencode/schema/money"
+import { SessionForkTitle } from "@opencode/schema/session-fork-title"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionExecution } from "@opencode/core/session/execution"
 import { SessionRunCoordinator } from "@opencode/core/session/run-coordinator"
@@ -1050,6 +1051,33 @@ describe("SessionRunnerLLM", () => {
 
     expect((yield* s.session.get(sessionID)).title).toBe("Generated title")
     yield* Fiber.interrupt(fiber)
+  })
+
+  scenario("names a fork from its first new prompt while its reply is still running", function* (s) {
+    yield* s.llm.push(TestLLM.text("Original reply", "text-original"))
+    yield* s.runPrompt("Inherited error report")
+    const branch = yield* s.session.fork({ sessionID })
+    yield* prepareTitleGeneration
+    const messageID = SessionMessage.ID.create()
+    const fallback = "Explore a different fix"
+    yield* s.session.rename({ sessionID: branch.id, title: fallback })
+    yield* s.session.setMetadata({
+      sessionID: branch.id,
+      metadata: { [SessionForkTitle.key]: { sessionID: branch.id, messageID, fallback } },
+    })
+    yield* s.session.prompt({ sessionID: branch.id, id: messageID, text: fallback, resume: false })
+    yield* s.llm.push(TestLLM.text("Alternative fix", "text-title"), Stream.never)
+
+    const renamed = yield* watchRename(branch.id)
+    const runner = yield* SessionRunner.Service
+    const reply = yield* runner.drain({ sessionID: branch.id, force: true }).pipe(Effect.forkChild)
+    yield* Fiber.join(renamed)
+
+    expect((yield* s.session.get(branch.id)).title).toBe("Alternative fix")
+    const titlePrompt = JSON.stringify(s.requests[1]?.messages)
+    expect(titlePrompt).toContain(fallback)
+    expect(titlePrompt).not.toContain("Inherited error report")
+    yield* Fiber.interrupt(reply)
   })
 
   scenario("does not automatically replace an existing session title", function* (s) {

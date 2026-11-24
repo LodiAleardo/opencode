@@ -8,6 +8,7 @@ import { createComposerModel } from "@/composer/model"
 import { useComposerCommands } from "@/composer/commands"
 import { createNewSessionComposerAdapter, createNewSessionStartStore } from "./composer-adapter"
 import { NewSessionView } from "./view"
+import { ForkDraftView } from "./fork-draft-view"
 import { createNewSessionWorkspaceController } from "./workspace/controller"
 import { useNewSessionCommands } from "./commands"
 import { createDraftMcpControls } from "./mcp"
@@ -34,6 +35,7 @@ export default function NewSessionPage(props: { draftId: string }) {
   })
 
   const start = tabs.state(tabs.draft(props.draftId), "new-session-start", createNewSessionStartStore)
+  const fork = tabs.draft(props.draftId).fork
 
   const mcp = createDraftMcpControls({
     draftID: props.draftId,
@@ -43,6 +45,7 @@ export default function NewSessionPage(props: { draftId: string }) {
 
   const composer = createNewSessionComposerAdapter({
     draftID: props.draftId,
+    fork,
     worktree: workspace.selection.value,
     root: workspace.project.root,
     branch: workspace.bar.branch,
@@ -57,17 +60,18 @@ export default function NewSessionPage(props: { draftId: string }) {
   const project = createPromptProjectController({ controls: composer.project })
   const location = useNewSessionLocationDialog({ project, workspace, onDone: model.restoreFocus })
 
-  useNewSessionCommands({
-    restoreFocus: model.restoreFocus,
-    project: {
-      empty: project.empty,
-      open: () => location(),
-    },
-    workspace: {
-      enabled: workspace.bar.visible,
-      cycle: workspace.selection.cycle,
-    },
-  })
+  if (!fork)
+    useNewSessionCommands({
+      restoreFocus: model.restoreFocus,
+      project: {
+        empty: project.empty,
+        open: () => location(),
+      },
+      workspace: {
+        enabled: workspace.bar.visible,
+        cycle: workspace.selection.cycle,
+      },
+    })
   // Focus once the draft loads. restoreFocus reads the stored cursor, so tracking it here would reapply
   // a stale cursor a frame after every key-up and yank the caret from a key pressed in that frame.
   createEffect(
@@ -75,7 +79,7 @@ export default function NewSessionPage(props: { draftId: string }) {
       if (!ready) return
 
       // Search projects opened this draft; the picker returns focus to the composer when it closes.
-      if (layout.draft.projectSearch.take(props.draftId)) location()
+      if (!fork && layout.draft.projectSearch.take(props.draftId)) location()
       else model.restoreFocus()
     }),
   )
@@ -100,7 +104,11 @@ export default function NewSessionPage(props: { draftId: string }) {
     <div class="relative size-full overflow-hidden flex flex-col">
       {suspendUntilPromptReady()}
       <div class="flex-1 min-h-0 flex flex-col gap-2 px-[var(--shell-inline-inset,8px)] pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]">
-        <NewSessionView composer={model} project={project} workspace={workspace} location={location} />
+        {fork ? (
+          <ForkDraftView composer={model} fork={fork} />
+        ) : (
+          <NewSessionView composer={model} project={project} workspace={workspace} location={location} />
+        )}
       </div>
     </div>
   )

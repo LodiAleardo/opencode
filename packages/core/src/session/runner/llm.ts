@@ -204,8 +204,13 @@ const layer = Layer.effect(
                   )
                   // A control admitted during context preparation owns this boundary.
                   if (promoted === undefined) return undefined
-                  if (promoted > 0 && !selected.session.parentID && SessionTitle.isUntitled(selected.session))
-                    yield* FiberMap.run(titles, sessionID, title.generate(sessionID), {
+                  const forkPrompt = promoted > 0 ? SessionTitle.pendingForkTitle(selected.session) : undefined
+                  if (
+                    promoted > 0 &&
+                    !selected.session.parentID &&
+                    (forkPrompt || SessionTitle.isUntitled(selected.session))
+                  )
+                    yield* FiberMap.run(titles, sessionID, title.generate(sessionID, forkPrompt), {
                       onlyIfMissing: true,
                     })
                   if (promoted > 0) step = 1

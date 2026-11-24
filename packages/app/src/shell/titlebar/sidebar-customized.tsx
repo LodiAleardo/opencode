@@ -20,12 +20,15 @@ import { ProjectIcon } from "@/shell/layout/project-icon"
 import { createProjectSessionActions } from "@/shell/tabs/project-sessions"
 import { tabKey, useTabs, type SessionTab, type Tab } from "@/shell/tabs/tabs"
 import { ProjectSessionRow } from "./project-session-row"
+import { forkTitles, MAX_FORK_INDENT } from "./fork-tree"
+import { SideTabForkItem, type createSideTabFork } from "./side-tab-fork"
 import { isSidebarSessionActivity, mergeSidebarSessions } from "./sidebar-sessions"
 import type { TabStripLeading, TabStripSection } from "./tab-strip"
 import { SidebarViewMenu } from "./sidebar-view-menu"
 import {
   SIDEBAR_GROUPINGS,
   SIDEBAR_ORDERINGS,
+  sidebarParentKey,
   sidebarView,
   type SidebarFilterKind,
   type SidebarFilters,
@@ -64,6 +67,7 @@ type SectionFooter = { type: "group" | "row"; key: string }
 type SectionPlan = {
   key: string
   tabs: Tab[]
+  rows?: (Tab | string)[]
   /** The key of the group the header shows. */
   header: string | undefined
   hideAvatars: boolean
@@ -86,6 +90,7 @@ function samePlans(a: SectionPlan[], b: SectionPlan[]) {
         plan.hideAvatars === other.hideAvatars &&
         plan.footer?.type === other.footer?.type &&
         plan.footer?.key === other.footer?.key &&
+        sameList(plan.rows, other.rows) &&
         sameList(plan.tabs, other.tabs)
       )
     })
@@ -98,6 +103,8 @@ export type SidebarStripGrouping = {
   tabLabel?: (tab: Tab) => string | undefined
   tabMenu?: (tab: SessionTab) => JSX.Element
   tabMuted?: (tab: SessionTab) => boolean
+  tabDepth?: (tab: SessionTab) => number | undefined
+  tabTitle?: (tab: SessionTab) => string | undefined
   leading?: TabStripLeading
 }
 
@@ -105,6 +112,7 @@ export type SidebarStripGrouping = {
 export function SidebarCustomized(props: {
   currentTab: Tab | undefined
   onNewSession: () => void
+  sideTabFork?: ReturnType<typeof createSideTabFork>
   children: (strip: SidebarStripGrouping) => JSX.Element
 }) {
   const language = useLanguage()
@@ -229,6 +237,8 @@ export function SidebarCustomized(props: {
         open: true,
         active: isActive(tab.server, tab.sessionId),
         parentKey: undefined,
+        forkParentKey:
+          props.sideTabFork && session?.fork ? sessionRowKey(tab.server, session.fork.sessionID) : undefined,
         status: status(ctx, session),
         updated: session?.time.updated ?? 0,
         created: session?.time.created ?? 0,
@@ -271,6 +281,8 @@ export function SidebarCustomized(props: {
             open: false,
             active: isActive(server, session.id),
             parentKey: session.parentID ? sessionRowKey(server, session.parentID) : undefined,
+            forkParentKey:
+              props.sideTabFork && session.fork ? sessionRowKey(server, session.fork.sessionID) : undefined,
             status: status(ctx, session),
             updated: session.time.updated,
             created: session.time.created,
@@ -287,6 +299,19 @@ export function SidebarCustomized(props: {
   })
 
   const result = createMemo(() => sidebarView(rows(), state()))
+
+  const forkLabels = createMemo(() => {
+    if (!props.sideTabFork) return
+
+    return new Map(
+      [...Map.groupBy(rows(), (row) => row.server)].map(([server, items]) => [
+        server,
+        forkTitles(items.flatMap((row) => row.session ?? []), (title, branch) =>
+          language.t("session.tab.forkTitle", { title, branch }),
+        ),
+      ]),
+    )
+  })
 
   const groups = createMemo(() => result().groups.flatMap((group) => [group, ...(group.children ?? [])]))
 
@@ -333,15 +358,18 @@ export function SidebarCustomized(props: {
 
   // Every row whose top-level ancestor is an open tab renders under that tab; the rest render in the group's footer.
   const anchorOf = (row: Row, byKey: Map<string, Row>): Row => {
-    const parent = row.parentKey ? byKey.get(row.parentKey) : undefined
+    const parent = byKey.get(sidebarParentKey(row) ?? "")
 
     return parent ? anchorOf(parent, byKey) : row
   }
 
   const depthOf = (row: Row, byKey: Map<string, Row>): number => {
-    const parent = row.parentKey ? byKey.get(row.parentKey) : undefined
+    const parent = byKey.get(sidebarParentKey(row) ?? "")
 
-    return parent ? depthOf(parent, byKey) + 1 : 0
+    if (!parent) return 0
+    const depth = depthOf(parent, byKey) + 1
+
+    return row.forkParentKey ? Math.min(depth, MAX_FORK_INDENT) : depth
   }
 
   const openSession = (row: Row) => {
@@ -353,7 +381,7 @@ export function SidebarCustomized(props: {
 
   // Rows outside a project group carry their project's avatar, as open tabs always do; subagents follow their parent.
   const avatarOf = (row: Row, group: SidebarGroup<Row> | undefined) => {
-    if (group?.kind === "project" || row.parentKey || !row.projectID) return
+    if (group?.kind === "project" || (props.sideTabFork ? depthOf(row, rowByKey()) > 0 : row.parentKey) || !row.projectID) return
 
     return projectLabels().get(row.projectID) ?? row.project
   }
@@ -376,11 +404,23 @@ export function SidebarCustomized(props: {
           <ProjectSessionRow
             server={ServerConnection.key(value().conn)}
             session={value().session}
+            displayTitle={forkLabels()?.get(value().row.server)?.get(value().session.id)}
             openTab={false}
             active={value().row.active}
             label={showLabel(value().row, group())}
             depth={rowProps.flat ? 0 : depthOf(value().row, rowByKey())}
             project={avatarOf(value().row, group())}
+            forkItem={
+              <Show when={props.sideTabFork}>
+                {(action) => (
+                  <SideTabForkItem
+                    action={action()}
+                    server={ServerConnection.key(value().conn)}
+                    session={value().session}
+                  />
+                )}
+              </Show>
+            }
             onOpen={() => openSession(value().row)}
           />
         )}
@@ -395,6 +435,33 @@ export function SidebarCustomized(props: {
     return row ? { type: "row", key: row.key } : undefined
   }
 
+  const hasForkTree = (group: SidebarGroup<Row>) =>
+    group.rows.some((row) => row.forkParentKey && rowByKey().has(row.forkParentKey))
+
+  const recentFamilies = (group: SidebarGroup<Row>, interleaved: boolean) => {
+    const byKey = rowByKey()
+    const entries = group.rows.map((row) => ({ row, anchor: anchorOf(row, byKey) }))
+
+    const open = new Set(
+      entries.flatMap(({ row, anchor }) => ((interleaved ? row.open || row.active : anchor.open) ? [anchor] : [])),
+    )
+
+    const recent = entries.flatMap(({ row, anchor }) => (row === anchor && !open.has(row) ? [row] : []))
+    const step = group.kind === "all" ? RECENT_STEP_UNGROUPED : RECENT_STEP
+    const limit = local.limits[group.key] ?? step
+    const shown = new Set(recent.slice(0, limit))
+
+    return {
+      rows: [
+        ...(interleaved ? entries.filter(({ anchor }) => open.has(anchor)) : []),
+        ...entries.filter(({ anchor }) => shown.has(anchor)),
+      ].map(({ row }) => row),
+      more: recent.length > limit,
+      limit,
+      step,
+    }
+  }
+
   function GroupFooter(footerProps: { groupKey: string }) {
     const footer = createMemo(
       () => {
@@ -402,22 +469,10 @@ export function SidebarCustomized(props: {
 
         if (!group) return { keys: [], more: false, limit: 0, step: 0 }
 
-        const footerRows = group.rows.filter((row) => !anchorOf(row, rowByKey()).open)
+        const interleaved = hasForkTree(group)
+        const page = recentFamilies(group, interleaved)
 
-        const topLevel = footerRows.filter((row) => anchorOf(row, rowByKey()) === row)
-
-        const step = group.kind === "all" ? RECENT_STEP_UNGROUPED : RECENT_STEP
-
-        const limit = local.limits[group.key] ?? step
-
-        const shown = new Set(topLevel.slice(0, limit))
-
-        return {
-          keys: footerRows.filter((row) => shown.has(anchorOf(row, rowByKey()))).map((row) => row.key),
-          more: topLevel.length > limit,
-          limit,
-          step,
-        }
+        return { ...page, keys: interleaved ? [] : page.rows.map((row) => row.key) }
       },
       undefined,
       { equals: (a, b) => sameList(a.keys, b.keys) && a.more === b.more && a.limit === b.limit && a.step === b.step },
@@ -440,26 +495,33 @@ export function SidebarCustomized(props: {
     )
   }
 
-  const leafPlan = (group: SidebarGroup<Row>): SectionPlan => ({
-    key: group.key,
-    tabs: group.rows.flatMap((row) => (row.open && row.tab && (!group.collapsed || row.active) ? [row.tab] : [])),
-    header: group.kind === "all" ? undefined : group.key,
-    hideAvatars: group.kind === "project",
-    footer: group.collapsed ? activeRecent(group) : { type: "group", key: group.key },
-  })
+  const planGroup = (group: SidebarGroup<Row>): SectionPlan => {
+    const visible = !group.collapsed && hasForkTree(group) ? recentFamilies(group, true).rows : undefined
+
+    return {
+      key: group.key,
+      tabs: (visible ?? group.rows).flatMap((row) =>
+        row.open && row.tab && (!group.collapsed || row.active) ? [row.tab] : [],
+      ),
+      rows: visible?.map((row) => row.tab ?? row.key),
+      header: group.kind === "all" ? undefined : group.key,
+      hideAvatars: group.kind === "project",
+      footer: group.collapsed ? activeRecent(group) : { type: "group", key: group.key },
+    }
+  }
 
   // Only the shape of the sidebar lives here. Headers and footers read their data live, so a session update that
   // leaves the shape alone keeps every header and row mounted, with its hover, focus, menus and dialogs.
   const plans = createMemo(
     () =>
       result().groups.flatMap((group): SectionPlan[] => {
-        if (!group.children) return [leafPlan(group)]
+        if (!group.children) return [planGroup(group)]
 
         // Server → Project keeps every row at one inset: the server reads as a section label above its projects.
         if (!group.collapsed)
           return [
             { key: group.key, tabs: [], header: group.key, hideAvatars: false, footer: undefined },
-            ...group.children.map(leafPlan),
+            ...group.children.map(planGroup),
           ]
 
         const active = group.children.find((child) => child.rows.some((row) => row.active))
@@ -483,6 +545,8 @@ export function SidebarCustomized(props: {
       (plan): TabStripSection => ({
         key: plan.key,
         tabs: plan.tabs,
+        rows: plan.rows,
+        renderRow: (key) => <SessionRowItem rowKey={key} />,
         header: plan.header ? <GroupHeader groupKey={plan.header} /> : undefined,
         hideAvatars: plan.hideAvatars,
         footer:
@@ -503,7 +567,7 @@ export function SidebarCustomized(props: {
       result().groups.forEach((parent) => {
         if (parent.collapsed) return
         ;(parent.children ?? [parent]).forEach((group) => {
-          if (group.collapsed) return
+          if (group.collapsed || hasForkTree(group)) return
 
           group.rows.forEach((row) => {
             const anchor = anchorOf(row, rowByKey())
@@ -537,6 +601,13 @@ export function SidebarCustomized(props: {
     const row = rows().find((item) => item.key === key)
 
     return row ? showLabel(row, groupOf(key)) : undefined
+  }
+
+  const tabDepth = (tab: SessionTab) => {
+    const key = sessionRowKey(tab.server, tab.sessionId)
+    const row = rowByKey().get(key)
+
+    if (row?.forkParentKey && !groupOf(key)?.collapsed) return depthOf(row, rowByKey())
   }
 
   function GroupHeader(headerProps: { groupKey: string }) {
@@ -697,7 +768,13 @@ export function SidebarCustomized(props: {
         />
       </div>
       <div class="flex min-h-0 flex-1 flex-col pt-1">
-        {props.children({ sections: sections(), tabFooter, tabLabel })}
+        {props.children({
+          sections: sections(),
+          tabFooter,
+          tabLabel,
+          tabDepth: props.sideTabFork ? tabDepth : undefined,
+          tabTitle: props.sideTabFork ? (tab) => forkLabels()?.get(tab.server)?.get(tab.sessionId) : undefined,
+        })}
         <Show when={filterCount() > 0 && !visibleRows().some((row) => !row.active)}>
           <div class="px-2 py-2 text-12-regular text-v2-text-text-faint">
             {language.t("sidebar.view.noMatch")}{" "}

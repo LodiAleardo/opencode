@@ -3,7 +3,9 @@ export * as SessionTitle from "./title.js"
 import { isDeepStrictEqual } from "node:util"
 import { LLMClient, LLMEvent, Message, SystemPart } from "@opencode/ai/effect"
 import type { Agent } from "@opencode/schema/agent"
-import { Context, DateTime, Effect, Layer, Stream } from "effect"
+import type { SessionMessage } from "@opencode/schema/session-message"
+import { SessionForkTitle } from "@opencode/schema/session-fork-title"
+import { Context, DateTime, Effect, Layer, Option, Schema, Stream } from "effect"
 import { Database } from "../database/database.js"
 import { Bus } from "../bus.js"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
@@ -25,7 +27,7 @@ const titleChanged = Symbol("Session title changed")
 
 export interface Interface {
   /** Generates an initial title or regenerates one from bounded conversation history. */
-  readonly generate: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly generate: (sessionID: SessionSchema.ID, forkPrompt?: SessionMessage.ID) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionTitle") {}
@@ -42,6 +44,16 @@ export const isUntitled = (session: SessionSchema.Info) =>
     title: session.title,
     time: { created: DateTime.toEpochMillis(session.time.created) },
   })
+
+const decodeForkTitle = Schema.decodeUnknownOption(SessionForkTitle.Request)
+
+export function pendingForkTitle(session: SessionSchema.Info) {
+  if (!session.fork) return
+  const request = Option.getOrUndefined(decodeForkTitle(session.metadata?.[SessionForkTitle.key]))
+
+  // Forks inherit metadata. A request only belongs to the session that recorded it, and a manual rename cancels it.
+  if (request?.sessionID === session.id && request.fallback === session.title) return request.messageID
+}
 
 export const layer = Layer.effect(
   Service,
@@ -113,34 +125,47 @@ export const layer = Layer.effect(
         .find((line) => line.length > 0)
     })
 
-    const generate = Effect.fn("SessionTitle.generate")(function* (sessionID: SessionSchema.ID) {
+    const generate = Effect.fn("SessionTitle.generate")(function* (
+      sessionID: SessionSchema.ID,
+      forkPrompt?: SessionMessage.ID,
+    ) {
       const session = yield* store.get(sessionID)
       if (!session) return
-      const firstUser = yield* SessionHistory.firstUserMessage(db, session.id)
+      if (forkPrompt !== undefined && pendingForkTitle(session) !== forkPrompt) return
+      const firstUser = forkPrompt
+        ? yield* store
+            .message(forkPrompt)
+            .pipe(
+              Effect.map((entry) =>
+                entry?.sessionID === sessionID && entry.message.type === "user" ? entry.message : undefined,
+              ),
+            )
+        : yield* SessionHistory.firstUserMessage(db, session.id)
       if (!firstUser) return
-      const text = !isUntitled(session)
-        ? yield* store.context(session.id).pipe(
-            Effect.map((messages) => {
-              const original = `Original request:\n${TextBoundary.head(firstUser.text, MAX_FIRST_MESSAGE_LENGTH)}`
-              const recent = messages
-                .flatMap((message) => {
-                  if (message.type === "user" && message.id !== firstUser.id) return [`User: ${message.text.trim()}`]
-                  if (message.type !== "assistant") return []
-                  const text = message.content
-                    .flatMap((part) => (part.type === "text" ? [part.text.trim()] : []))
-                    .filter(Boolean)
-                    .join("\n")
-                  return text ? [`Assistant: ${text}`] : []
-                })
-                .join("\n\n")
-              if (!recent) return conversationPrompt(original)
-              const prefix = `${original}\n\nRecent conversation:\n`
-              const budget = MAX_CONTEXT_LENGTH - conversationPrompt("").length - prefix.length
-              return conversationPrompt(`${prefix}${TextBoundary.tail(recent, budget)}`)
-            }),
-            Effect.orElseSucceed(() => messagePrompt(firstUser.text)),
-          )
-        : messagePrompt(firstUser.text)
+      const text =
+        !forkPrompt && !isUntitled(session)
+          ? yield* store.context(session.id).pipe(
+              Effect.map((messages) => {
+                const original = `Original request:\n${TextBoundary.head(firstUser.text, MAX_FIRST_MESSAGE_LENGTH)}`
+                const recent = messages
+                  .flatMap((message) => {
+                    if (message.type === "user" && message.id !== firstUser.id) return [`User: ${message.text.trim()}`]
+                    if (message.type !== "assistant") return []
+                    const text = message.content
+                      .flatMap((part) => (part.type === "text" ? [part.text.trim()] : []))
+                      .filter(Boolean)
+                      .join("\n")
+                    return text ? [`Assistant: ${text}`] : []
+                  })
+                  .join("\n\n")
+                if (!recent) return conversationPrompt(original)
+                const prefix = `${original}\n\nRecent conversation:\n`
+                const budget = MAX_CONTEXT_LENGTH - conversationPrompt("").length - prefix.length
+                return conversationPrompt(`${prefix}${TextBoundary.tail(recent, budget)}`)
+              }),
+              Effect.orElseSucceed(() => messagePrompt(firstUser.text)),
+            )
+          : messagePrompt(forkPrompt ? TextBoundary.head(firstUser.text, MAX_FIRST_MESSAGE_LENGTH) : firstUser.text)
       const selection = yield* context.selectTitle(session)
       if (!selection) return
       const title =

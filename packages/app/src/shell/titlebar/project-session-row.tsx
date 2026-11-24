@@ -35,6 +35,7 @@ import "./tab-nav.css"
 export function ProjectSessionRow(props: {
   server: ServerConnection.Key
   session: SessionInfo
+  displayTitle?: string
   openTab: boolean
   active: boolean
   /** A faint trailing label, such as the server a session belongs to. */
@@ -47,6 +48,7 @@ export function ProjectSessionRow(props: {
   muted?: boolean
   /** Menu items shown above the row's own. */
   menuItems?: () => JSX.Element
+  forkItem?: JSX.Element
   onOpen: () => void
 }) {
   const language = useLanguage()
@@ -137,7 +139,7 @@ export function ProjectSessionRow(props: {
         class="relative flex h-7 w-full shrink-0 items-center gap-2 rounded-[6px] ps-8 pe-2 text-start text-[13px] leading-[var(--line-height-compact)] font-medium"
         classList={{ "text-v2-text-text-base": props.active, "text-v2-text-text-faint": !props.active }}
         aria-current={props.active ? "page" : undefined}
-        title={sessionLabel(props.session)}
+        title={props.displayTitle ?? sessionLabel(props.session)}
         style={props.depth ? { "padding-inline-start": `calc(2rem + ${props.depth * 14}px)` } : undefined}
         onClick={props.onOpen}
       >
@@ -159,7 +161,7 @@ export function ProjectSessionRow(props: {
           </span>
         </Show>
         <span class="min-w-0 flex-1 truncate" dir="auto">
-          {sessionLabel(props.session)}
+          {props.displayTitle ?? sessionLabel(props.session)}
         </span>
         <Show when={props.label}>
           {(label) => (
@@ -219,6 +221,7 @@ export function ProjectSessionRow(props: {
           >
             {language.t("common.export")}…
           </Menu.Item>
+          {props.forkItem}
           <SessionReadMenuItem server={props.server} session={props.session} />
           <Menu.Separator />
           <Menu.Item disabled={!ctx()} onSelect={() => dialog.show(() => <DeleteDialog />)}>

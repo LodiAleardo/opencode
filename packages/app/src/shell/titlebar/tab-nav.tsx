@@ -72,6 +72,7 @@ export function TabNavItem(
     href: string
     server: ServerConnection.Key
     session: SessionInfo | undefined
+    displayTitle?: string
     preparing: boolean
     unread: boolean
     attention: boolean
@@ -85,6 +86,7 @@ export function TabNavItem(
     muted?: boolean
     /** Menu items shown above an open tab's own. */
     menuItems?: () => JSX.Element
+    forkItem?: JSX.Element
     fallbackTitle?: string
     fallbackDirectory?: string
     onNavigate: () => void
@@ -175,7 +177,10 @@ export function TabNavItem(
   const title = createMemo(() => {
     const session = props.session
 
-    return sessionTabTitle(session ? session.title : props.fallbackTitle, language.t("session.tab.session"))
+    return sessionTabTitle(
+      props.displayTitle ?? (session ? session.title : props.fallbackTitle),
+      language.t("session.tab.session"),
+    )
   })
 
   const projectName = createMemo(() => {
@@ -386,7 +391,7 @@ export function TabNavItem(
       type: "edit.start",
       source,
       sessionID: props.session?.id,
-      title: props.session?.title ?? "",
+      title: props.displayTitle ?? props.session?.title ?? "",
       enabled: !props.dragging,
     })
 
@@ -624,7 +629,7 @@ export function TabNavItem(
         }}
         data={{
           projectName: projectName(),
-          title: props.session?.title,
+          title: props.displayTitle ?? props.session?.title,
           path: previewPath(),
           serverName: serverLabel(),
         }}
@@ -668,6 +673,7 @@ export function TabNavItem(
               >
                 {language.t("common.export")}…
               </Menu.Item>
+              {props.forkItem}
               <SessionReadMenuItem server={props.server} session={props.session} />
               <Show when={props.contextMenuExtra}>
                 {(extra) => (

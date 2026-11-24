@@ -96,6 +96,21 @@ describe("transitionSessionFork", () => {
     ])
   })
 
+  test("a fork draft submits its selected boundary without restoring the original prompt", () => {
+    const [started, opened] = replay(
+      [
+        { type: "fork.requested", sessionID: "ses_1", messageID: "msg_boundary" },
+        { type: "fork.succeeded", attempt: 1, session: forked },
+      ],
+      createSessionForkState("inline"),
+    )
+
+    expect(started?.effects).toEqual([
+      { type: "fork.start", attempt: 1, sessionID: "ses_1", messageID: "msg_boundary", timeoutMs: FORK_TIMEOUT_MS },
+    ])
+    expect(opened?.effects).toEqual([{ type: "fork.open", attempt: 1, session: forked }])
+  })
+
   test("a failed fork toasts and lets the user pick again", () => {
     const [failed, retried] = replay(
       [{ type: "fork.failed", attempt: 1, message: "500" }, request()],

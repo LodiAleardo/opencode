@@ -149,6 +149,14 @@ export const clientSettings: Entry<SettingsRootTab>[] = [
   },
   {
     tab: "experimental",
+    label: "settings.experimental.row.sideTabForks.title",
+    target: "settings-side-tab-forks",
+    description: "settings.experimental.row.sideTabForks.description",
+    keywords: "branch fork conversation draft sidebar",
+    available: "desktop",
+  },
+  {
+    tab: "experimental",
     label: "settings.experimental.row.sidebarOrganize.title",
     target: "settings-sidebar-organize",
     description: "settings.experimental.row.sidebarOrganize.description",

@@ -1,8 +1,15 @@
 import { Predicate } from "effect"
 import { base64Encode } from "@opencode/util/encode"
 import { Session } from "@opencode/schema/session"
+import { SessionForkTitle } from "@opencode/schema/session-fork-title"
+import { TextBoundary } from "@opencode/util/text-boundary"
 import { createMemo, createSignal, onCleanup, startTransition, untrack } from "solid-js"
-import type { ComposerSession, NewSessionComposerAdapter } from "@/composer/adapter"
+import type {
+  ComposerSelection,
+  ComposerSession,
+  ComposerSubmissionHandle,
+  NewSessionComposerAdapter,
+} from "@/composer/adapter"
 import { useComposerState } from "@/composer/persistence"
 import { createComposerControls, createComposerModelSelection } from "@/composer/selection"
 import { createComposerProjectControls } from "./project/controller"
@@ -10,7 +17,8 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { useLocal } from "@/providers/models/selection"
 import { useData, useServer } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
-import { useTabs } from "@/shell/tabs/tabs"
+import { useTabs, type DraftTab } from "@/shell/tabs/tabs"
+import { createForkAction } from "@/session/fork-action"
 import { createWorktree } from "@/workspaces/create"
 import { showToast } from "@/shell/notifications/toast"
 import type { DraftMcpControls } from "./mcp"
@@ -77,6 +85,7 @@ type Started = Awaited<ReturnType<NewSessionComposerAdapter["start"]>>
 
 export function createNewSessionComposerAdapter(props: {
   draftID: string
+  fork?: DraftTab["fork"]
   worktree: () => string
   root: () => string
   branch: () => string | undefined
@@ -94,6 +103,96 @@ export function createNewSessionComposerAdapter(props: {
   const language = useLanguage()
   const model = createComposerModelSelection({ agent: () => local.agent.current() })
   const controls = createComposerControls({ model })
+  const forkAction = props.fork && tabs.state(tabs.draft(props.draftID), "fork-start", () => createForkAction("inline"))
+
+  const promoteComposer = (
+    directory: string,
+    sessionID: string,
+    selection: ComposerSelection,
+    submission: ComposerSubmissionHandle,
+  ) =>
+    startTransition(() => {
+      local.session.promote(directory, sessionID, {
+        agent: selection.agent,
+        model: selection.model,
+        variant: selection.variant,
+        choices: model.remembered(),
+      })
+      submission.retarget(
+        prompt.capture({ dir: base64Encode(directory), id: sessionID }, { server: server.key, scope: serverSDK.scope }),
+        { preserveDraft: true },
+      )
+    })
+
+  const startFork: NewSessionComposerAdapter["start"] = async (selection, submission, message) => {
+    const source = props.fork
+
+    if (!source || !forkAction) return
+
+    const session = await forkAction.fork(
+      { type: "fork.requested", sessionID: source.sessionID, messageID: source.messageID },
+      async (sessionID, before, signal) => {
+        const fork = await serverSDK.api.session.fork({ sessionID, before }, { signal })
+        const title = forkPromptTitle(message.text) || language.t("session.tab.fork")
+
+        const metadata = {
+          ...fork.metadata,
+          [SessionForkTitle.key]: { sessionID: fork.id, messageID: message.id, fallback: title },
+        }
+
+        const named =
+          draftOpen() && !signal.aborted
+            ? await serverSDK.api.session
+                .update(
+                  { sessionID: fork.id, title, metadata },
+                  { signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]) },
+                )
+                .then(
+                  () => ({ ...fork, title, metadata }),
+                  (error) => {
+                    if (!signal.aborted)
+                      showToast({
+                        title: language.t("common.requestFailed"),
+                        description: errorMessage(language, error),
+                      })
+
+                    return fork
+                  },
+                )
+            : fork
+
+        // The fork API assigns the new ID. If the draft closed while the request was running, undo the copy.
+        if (signal.aborted) void data.session.remove(fork.id).catch(() => undefined)
+
+        return named
+      },
+    )
+
+    if (!session) return
+
+    if (!draftOpen()) {
+      void data.session.remove(session.id).catch(() => undefined)
+
+      return
+    }
+
+    const directory = session.location.directory
+    data.session.remember(session)
+
+    const pending = tabs.prepareSession(
+      props.draftID,
+      { server: server.key, sessionId: session.id },
+      { message, selection, view: props.start.view },
+    )
+
+    return {
+      cleanupReady: pending.ready.then(() => promoteComposer(directory, session.id, selection, submission)),
+      complete: () => pending.complete(submission.target()),
+      session: createdSession(session.id, directory),
+    }
+  }
+
+  const draftOpen = () => tabs.store.some((tab) => tab.type === "draft" && tab.draftID === props.draftID)
 
   const adapter: NewSessionComposerAdapter = {
     kind: "new-session",
@@ -103,6 +202,8 @@ export function createNewSessionComposerAdapter(props: {
     working: () => false,
     submitted: props.submitted,
     start(selection, submission, message) {
+      if (props.fork) return startFork(selection, submission, message)
+
       const projectDirectory = props.root()
       const worktree = props.worktree()
       const directory = worktree === "main" ? projectDirectory : worktree
@@ -221,24 +322,8 @@ export function createNewSessionComposerAdapter(props: {
             }
 
             if (effect.type === "session.promote") {
-              const cleanupReady = startTransition(() => {
-                local.session.promote(effect.directory, effect.sessionID, {
-                  agent: selection.agent,
-                  model: selection.model,
-                  variant: selection.variant,
-                  choices: model.remembered(),
-                })
-                submission.retarget(
-                  prompt.capture(
-                    { dir: base64Encode(effect.directory), id: effect.sessionID },
-                    { server: server.key, scope: serverSDK.scope },
-                  ),
-                  { preserveDraft: true },
-                )
-              })
-
               settled.resolve({
-                cleanupReady,
+                cleanupReady: promoteComposer(effect.directory, effect.sessionID, selection, submission),
                 complete: () => pending.complete(submission.target()),
                 session: createdSession(effect.sessionID, effect.directory),
               })
@@ -275,7 +360,7 @@ export function createNewSessionComposerAdapter(props: {
     },
   }
 
-  const createdSession = (id: Session.ID, directory: string): ComposerSession => ({
+  const createdSession = (id: string, directory: string): ComposerSession => ({
     id,
     directory,
     handoff: server.ctx.handoff.forSession(id),
@@ -292,6 +377,12 @@ export function createNewSessionComposerAdapter(props: {
     model,
     ready: prompt.ready,
   }
+}
+
+export function forkPromptTitle(text: string) {
+  const title = text.trim().replace(/\s+/g, " ")
+
+  return title.length > 100 ? `${TextBoundary.head(title, 97)}...` : title
 }
 
 function errorMessage(language: ReturnType<typeof useLanguage>, cause: unknown) {

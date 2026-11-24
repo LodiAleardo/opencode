@@ -14,3 +14,5 @@ export const ProjectGroups = { render: (args: Args) => <NavigationStory preset="
 export const CollapsedCurrentProject = {
   render: (args: Args) => <NavigationStory preset="collapsed" width={args.width} />,
 }
+
+export const SessionForks = { render: (args: Args) => <NavigationStory preset="forks" width={args.width} /> }

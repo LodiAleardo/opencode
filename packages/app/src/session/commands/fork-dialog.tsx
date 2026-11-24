@@ -1,4 +1,5 @@
 import { Component, createMemo, For, Show } from "solid-js"
+import type { SessionMessageInfo } from "@opencode/client/promise"
 import { useParams } from "@solidjs/router"
 import { useData } from "@/runtime/server/current"
 import { useDialog } from "@opencode/ui/context/dialog"
@@ -24,6 +25,22 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString(undefined, { timeStyle: "short" })
 }
 
+export function forkableMessages(messages: readonly SessionMessageInfo[]): ForkableMessage[] {
+  return messages
+    .flatMap((message) =>
+      message.type === "user" && message.text
+        ? [
+            {
+              id: message.id,
+              text: message.text.replace(/\n/g, " ").slice(0, 200),
+              time: formatTime(new Date(message.time.created)),
+            },
+          ]
+        : [],
+    )
+    .reverse()
+}
+
 export const DialogFork: Component = () => {
   const params = useParams()
   const data = useData()
@@ -36,25 +53,10 @@ export const DialogFork: Component = () => {
     onClose: () => dialog.close(),
   })
 
-  const messages = createMemo((): ForkableMessage[] => {
+  const messages = createMemo(() => {
     const sessionID = params.id
 
-    if (!sessionID) return []
-
-    const msgs = data.session.message.list(sessionID)
-    const result: ForkableMessage[] = []
-
-    for (const message of msgs) {
-      if (message.type !== "user" || !message.text) continue
-
-      result.push({
-        id: message.id,
-        text: message.text.replace(/\n/g, " ").slice(0, 200),
-        time: formatTime(new Date(message.time.created)),
-      })
-    }
-
-    return result.reverse()
+    return sessionID ? forkableMessages(data.session.message.list(sessionID)) : []
   })
 
   const handleSelect = (messageID: string) => {
@@ -76,6 +78,7 @@ export const DialogFork: Component = () => {
 export function ForkDialog(props: {
   messages: ForkableMessage[]
   disabled?: boolean
+  loading?: boolean
   pendingMessageID?: string
   onSelect: (messageID: string) => void
 }) {
@@ -154,7 +157,12 @@ export function ForkDialog(props: {
             when={list.flat().length > 0}
             fallback={
               <div class="search-list-empty">
-                {language.t(props.messages.length > 0 ? "dialog.fork.search.empty" : "dialog.fork.empty")}
+                <Show
+                  when={props.loading}
+                  fallback={language.t(props.messages.length > 0 ? "dialog.fork.search.empty" : "dialog.fork.empty")}
+                >
+                  <Loader />
+                </Show>
               </div>
             }
           >

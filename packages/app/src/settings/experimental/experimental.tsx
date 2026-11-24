@@ -1,7 +1,8 @@
-import type { Component } from "solid-js"
+import { Show, type Component } from "solid-js"
 import { Switch } from "@opencode/ui/switch"
 import { Select } from "@opencode/ui/select"
 import { useLanguage } from "@/runtime/i18n/language"
+import { usePlatform } from "@/runtime/platform/platform"
 import { SettingsList } from "@/settings/list"
 import { useSettings } from "@/settings/model"
 import { SettingsRow } from "@/settings/row"
@@ -12,6 +13,7 @@ export const experimentalSettingsAvailable = true
 export const SettingsExperimental: Component = () => {
   const language = useLanguage()
   const settings = useSettings()
+  const platform = usePlatform()
 
   return (
     <>
@@ -43,6 +45,22 @@ export const SettingsExperimental: Component = () => {
                 </Switch>
               </div>
             </SettingsRow>
+            <Show when={platform.platform === "desktop"}>
+              <SettingsRow
+                title={language.t("settings.experimental.row.sideTabForks.title")}
+                description={language.t("settings.experimental.row.sideTabForks.description")}
+              >
+                <div data-action="settings-side-tab-forks">
+                  <Switch
+                    checked={settings.general.sideTabForks()}
+                    onChange={settings.general.setSideTabForks}
+                    hideLabel
+                  >
+                    {language.t("settings.experimental.row.sideTabForks.title")}
+                  </Switch>
+                </div>
+              </SettingsRow>
+            </Show>
             <SettingsRow
               title={language.t("settings.experimental.row.sidebarOrganize.title")}
               description={language.t("settings.experimental.row.sidebarOrganize.description")}

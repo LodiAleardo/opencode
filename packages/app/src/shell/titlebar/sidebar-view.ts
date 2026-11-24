@@ -30,6 +30,7 @@ export type SidebarRow = {
   active: boolean
   /** The row key of the parent session, for subagent rows. */
   parentKey: string | undefined
+  forkParentKey?: string
   status: SidebarStatus
   updated: number
   created: number
@@ -69,16 +70,14 @@ export const SIDEBAR_SHOW_KEYS: readonly SidebarShowKey[] = ["recent", "subagent
 export function sidebarView<R extends SidebarRow>(rows: readonly R[], state: SidebarViewState): SidebarView<R> {
   const kept = keptRows(rows, state)
   const keys = new Set(kept.map((row) => row.key))
+  const hasParent = (row: R) => keys.has(sidebarParentKey(row) ?? "")
 
-  const children = Map.groupBy(
-    kept.filter((row) => row.parentKey !== undefined && keys.has(row.parentKey)),
-    (row) => row.parentKey,
-  )
+  const children = Map.groupBy(kept.filter(hasParent), sidebarParentKey)
 
   const compare = comparator(state.ordering)
 
   const top = kept
-    .filter((row) => row.parentKey === undefined || !keys.has(row.parentKey))
+    .filter((row) => !hasParent(row))
     .toSorted((a, b) => Number(b.open) - Number(a.open) || compare(a, b) || byKey(a, b))
 
   const withChildren = (row: R): R[] => [
@@ -87,6 +86,10 @@ export function sidebarView<R extends SidebarRow>(rows: readonly R[], state: Sid
   ]
 
   return { groups: buildGroups(top, withChildren, state) }
+}
+
+export function sidebarParentKey(row: SidebarRow) {
+  return row.parentKey ?? row.forkParentKey
 }
 
 const ATTENTION: Record<SidebarStatus, number> = { input: 0, failed: 1, unread: 2, running: 3, idle: 4 }

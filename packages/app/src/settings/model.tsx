@@ -137,6 +137,7 @@ const generalSchema = Persistence.struct({
   newTimeline: Persistence.optional(Schema.Boolean),
   // Browser-style session tab grouping across vertical and horizontal tabs.
   tabGroups: Persistence.optional(Schema.Boolean),
+  sideTabForks: Persistence.optional(Schema.Boolean),
   // One side panel open state for every session tab, instead of one per tab.
   sharedSidePanel: Persistence.optional(Schema.Boolean),
   // "projects" is retired; `resolveSidebarOrganize` moves it to its replacement.
@@ -363,7 +364,8 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
   init: () => {
     const [store, setStore, , ready] = persisted({ key: "settings.v3" }, settingsPersistence, defaultSettings)
 
-    const prototypes = recentSessionsAvailable(usePlatform().platform, import.meta.env.VITE_OPENCODE_CHANNEL)
+    const channel = import.meta.env.VITE_OPENCODE_CHANNEL
+    const prototypes = recentSessionsAvailable(usePlatform().platform, channel)
 
     const sidebarOrganizeOptions: SidebarOrganize[] = prototypes
       ? ["list", "customize", "recent", "consolidated"]
@@ -463,6 +465,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setTabGroups(value: boolean) {
           setStore("general", "tabGroups", value)
+        },
+        sideTabForks: withFallback(
+          () => store.general?.sideTabForks,
+          import.meta.env.DEV || channel === "local" || channel === "dev",
+        ),
+        setSideTabForks(value: boolean) {
+          setStore("general", "sideTabForks", value)
         },
         sharedSidePanel: withFallback(() => store.general?.sharedSidePanel, false),
         setSharedSidePanel(value: boolean) {

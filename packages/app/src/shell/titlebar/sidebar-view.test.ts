@@ -148,6 +148,20 @@ describe("sidebarView", () => {
     expect(keys(rows, state({ show: { ...hidden, subagents: true } }))).toEqual(["parent", "sub"])
   })
 
+  test("groups forks under their source without the subagent setting, and keeps forks when the source is hidden", () => {
+    const rows = [
+      row({ key: "source", open: false }),
+      row({ key: "fork", forkParentKey: "source", updated: 9 }),
+      row({ key: "grandchild", forkParentKey: "fork" }),
+      row({ key: "subagent", open: false, parentKey: "fork" }),
+    ]
+
+    const show = { recent: true, subagents: false, serverLabels: false }
+
+    expect(keys(rows, state({ show }))).toEqual(["source", "fork", "grandchild"])
+    expect(keys(rows, state({ show: { ...show, recent: false } }))).toEqual(["fork", "grandchild"])
+  })
+
   test("collapsed groups hide their open keys but keep the active row", () => {
     const rows = [
       row({ key: "a1", server: "a", projectID: "p1", order: 0 }),

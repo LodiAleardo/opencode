@@ -636,6 +636,12 @@ export const dict = {
   "home.workspaceTip": "Start next session in a new workspace to keep changes isolated",
 
   "session.tab.session": "Session",
+  "session.tab.fork": "Fork",
+  "session.tab.forkDraft": "Fork draft",
+  "session.tab.forkDraft.preview": "Fork draft · This branch is created when you send your first message.",
+  "session.tab.forkDraft.historyEmpty": "There are no earlier messages at this fork point.",
+  "session.tab.forkDraft.historyUnavailable": "Couldn’t load the conversation at this fork point.",
+  "session.tab.forkTitle": "{{title}} (fork {{branch}})",
   "session.tab.more": "More...",
   "session.view.select": "Session view",
   "session.tab.add": "Add tab",
@@ -908,6 +914,8 @@ export const dict = {
   "settings.experimental.row.newQuestionUI.description": "Preview the keyboard-first question dock",
   "settings.experimental.row.tabGroups.title": "Tab groups",
   "settings.experimental.row.tabGroups.description": "Group session tabs in side tabs with inline session search",
+  "settings.experimental.row.sideTabForks.title": "Side tab forks",
+  "settings.experimental.row.sideTabForks.description": "Show conversation branches in Side tabs and fork from a draft",
   "settings.experimental.row.sidebarOrganize.title": "Organize vertical sidebar",
   "settings.experimental.row.sidebarOrganize.description":
     "Choose how to organize sessions in side tabs. On desktop, Customize replaces Home with Settings in the sidebar.",
