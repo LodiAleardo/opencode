@@ -1056,16 +1056,11 @@ describe("SessionRunnerLLM", () => {
   scenario("names a fork from its first new prompt while its reply is still running", function* (s) {
     yield* s.llm.push(TestLLM.text("Original reply", "text-original"))
     yield* s.runPrompt("Inherited error report")
-    const branch = yield* s.session.fork({ sessionID })
-    yield* prepareTitleGeneration
-    const messageID = SessionMessage.ID.create()
     const fallback = "Explore a different fix"
-    yield* s.session.rename({ sessionID: branch.id, title: fallback })
-    yield* s.session.setMetadata({
-      sessionID: branch.id,
-      metadata: { [SessionForkTitle.key]: { sessionID: branch.id, messageID, fallback } },
-    })
-    yield* s.session.prompt({ sessionID: branch.id, id: messageID, text: fallback, resume: false })
+    const branch = yield* s.session.fork({ sessionID, draftTitle: fallback })
+    expect(branch.title).toBe(fallback)
+    yield* prepareTitleGeneration
+    yield* s.session.prompt({ sessionID: branch.id, text: "Check a different approach", resume: false })
     yield* s.llm.push(TestLLM.text("Alternative fix", "text-title"), Stream.never)
 
     const renamed = yield* watchRename(branch.id)
@@ -1075,8 +1070,34 @@ describe("SessionRunnerLLM", () => {
 
     expect((yield* s.session.get(branch.id)).title).toBe("Alternative fix")
     const titlePrompt = JSON.stringify(s.requests[1]?.messages)
-    expect(titlePrompt).toContain(fallback)
+    expect(titlePrompt).toContain("Check a different approach")
+    expect(titlePrompt).not.toContain(fallback)
     expect(titlePrompt).not.toContain("Inherited error report")
+    yield* Fiber.interrupt(reply)
+  })
+
+  scenario("treats a generated fork title identical to its fallback as complete", function* (s) {
+    yield* s.llm.push(TestLLM.text("Original reply", "text-original"))
+    yield* s.runPrompt("Inherited error report")
+    const fallback = "Explore a different fix"
+    const branch = yield* s.session.fork({ sessionID, draftTitle: fallback })
+    yield* prepareTitleGeneration
+    yield* s.session.prompt({ sessionID: branch.id, text: fallback, resume: false })
+    yield* s.llm.push(TestLLM.text(fallback, "text-title"), Stream.never)
+
+    const bus = yield* Bus.Service
+    const settled = yield* bus.subscribe(SessionEvent.MetadataUpdated).pipe(
+      Stream.filter((event) => event.data.sessionID === branch.id),
+      Stream.take(1),
+      Stream.runDrain,
+      Effect.forkScoped({ startImmediately: true }),
+    )
+    const runner = yield* SessionRunner.Service
+    const reply = yield* runner.drain({ sessionID: branch.id, force: true }).pipe(Effect.forkChild)
+    yield* Fiber.join(settled)
+    const named = yield* s.session.get(branch.id)
+    expect(named.title).toBe(fallback)
+    expect(named.metadata?.[SessionForkTitle.key]).toBeUndefined()
     yield* Fiber.interrupt(reply)
   })
 

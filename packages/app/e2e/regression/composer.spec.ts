@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { NO_PROVIDER, SERVER, T0, expectPath, holdRoute, pageMessagesFrom, provider, sessionHref } from "../utils/app"
-import { mockWorkspace, openDraft, openSession } from "../utils/workspace"
+import { mockWorkspace, openDraft, openForkDraft, openSession } from "../utils/workspace"
 import { mockPluginsActivating, type MockServerConfig } from "../utils/mock-server"
 
 test.use({ permissions: ["clipboard-read", "clipboard-write"] })
@@ -1492,6 +1492,104 @@ test("/fork forks once while its request is pending, can retry a failure, and re
   await expect(dialog).toBeHidden()
   await expect(editor).toHaveText("Second prompt")
   expect(forks).toEqual(["msg_fork_second", "msg_fork_second"])
+})
+
+test("a fork draft retries a committed first send without creating another branch", async ({ page }) => {
+  const source = { id: "ses_fork_draft_source", title: "Fork source" }
+  const boundary = "msg_fork_draft_boundary"
+  const draftID = "fork-retry-draft"
+  const directory = "C:/OpenCode/ForkDraft"
+  const created: string[] = []
+  const forkRequests: Parameters<NonNullable<MockServerConfig["onFork"]>>[0][] = []
+  const prompts: Parameters<NonNullable<MockServerConfig["onPrompt"]>>[0][] = []
+
+  const { editor } = await openForkDraft(page, {
+    name: "ForkDraft",
+    directory,
+    draftID,
+    sessions: [source],
+    fork: { sessionID: source.id, messageID: boundary, title: source.title },
+    pageMessages: pageMessagesFrom({
+      [source.id]: [
+        { id: "msg_fork_draft_inherited", type: "user", text: "Inherited prompt", time: { created: T0 } },
+        { id: boundary, type: "user", text: "Excluded prompt", time: { created: T0 + 1 } },
+      ],
+    }),
+    onFork: (input) => void forkRequests.push(input),
+    afterFork: (id) => {
+      created.push(id)
+
+      if (created.length === 1) return { status: 503, body: { message: "Fork response lost" } }
+    },
+    onPrompt: (input) => void prompts.push(input),
+  })
+
+  await expect(page.getByText("Inherited prompt", { exact: true })).toBeVisible()
+  await expect(page.getByText("Excluded prompt", { exact: true })).toHaveCount(0)
+  expect(forkRequests).toEqual([])
+
+  const text = "Try a different approach"
+  await editor.fill(text)
+  await editor.press("Enter")
+  await expect(page.getByText("Request failed", { exact: true })).toBeVisible()
+  await expect(editor).toHaveText(text)
+  expect(prompts).toEqual([])
+
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
+  await editor.press("Enter")
+
+  const [child] = created
+  await expectPath(page, sessionHref(child))
+  await expect.poll(() => prompts).toEqual([{ sessionID: child, body: expect.objectContaining({ text }) }])
+  expect(created).toEqual([child])
+  expect(forkRequests).toEqual([
+    { sessionID: source.id, body: { before: boundary, experimental: { id: child, title: text } } },
+    { sessionID: source.id, body: { before: boundary, experimental: { id: child, title: text } } },
+  ])
+})
+
+test("closing a fork draft during its first send removes the late empty branch", async ({ page }) => {
+  const source = { id: "ses_abandon_fork_source", title: "Fork source" }
+  const boundary = "msg_abandon_fork_boundary"
+  const draftID = "close-fork-draft"
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const prompts: string[] = []
+
+  const { editor } = await openForkDraft(page, {
+    name: "CloseForkDraft",
+    directory: "C:/OpenCode/CloseForkDraft",
+    draftID,
+    sessions: [source],
+    fork: { sessionID: source.id, messageID: boundary, title: source.title },
+    pageMessages: pageMessagesFrom({
+      [source.id]: [{ id: boundary, type: "user", text: "Original prompt", time: { created: T0 } }],
+    }),
+    onFork: async () => {
+      started.resolve()
+      await release.promise
+    },
+    onPrompt: ({ sessionID }) => void prompts.push(sessionID),
+  })
+
+  try {
+    await editor.fill("Don’t send this")
+    await editor.press("Enter")
+    await started.promise
+    const tab = page.locator("[data-titlebar-tab]").filter({ has: page.getByRole("link", { name: "Fork draft" }) })
+    await tab.getByRole("button", { name: "Close tab", exact: true }).click()
+    await expectPath(page, sessionHref(source.id))
+
+    const removed = page.waitForRequest(
+      (request) => request.method() === "DELETE" && new URL(request.url()).pathname === `/api/session/ses_${draftID}`,
+    )
+
+    release.resolve()
+    await removed
+    expect(prompts).toEqual([])
+  } finally {
+    release.resolve()
+  }
 })
 
 const followUp = "Add follow-up, / for commands, @ for context…"

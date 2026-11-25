@@ -33,6 +33,14 @@ export class ForkEmptyError extends Schema.TaggedError<ForkEmptyError>()("Sessio
   }
 }
 
+export class ForkConflictError extends Schema.TaggedError<ForkConflictError>()("Session.ForkConflictError", {
+  sessionID: SessionSchema.ID,
+}) {
+  override get message() {
+    return `Session ID is already used by a different fork or session: ${this.sessionID}`
+  }
+}
+
 export class MessageDecodeError extends Schema.TaggedError<MessageDecodeError>()("Session.MessageDecodeError", {
   sessionID: SessionSchema.ID,
   messageID: SessionMessage.ID,

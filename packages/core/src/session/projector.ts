@@ -10,6 +10,7 @@ import { DatabaseBatch } from "../database/batch.js"
 import { Bus } from "../bus.js"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Model } from "@opencode/schema/model"
+import { SessionForkTitle } from "@opencode/schema/session-fork-title"
 import { SessionCwdStore } from "./cwd-store.js"
 import { SessionEvent } from "./event.js"
 import { SessionMessage } from "./message.js"
@@ -159,6 +160,7 @@ const projectFork = Effect.fn("SessionProjector.projectFork")(function* (
     .get()
     .pipe(Effect.orDie)
   const copiedSeq = copied?.seq
+  const draftTitle = event.data.draftTitle
 
   const stored = yield* db
     .insert(SessionTable)
@@ -172,10 +174,16 @@ const projectFork = Effect.fn("SessionProjector.projectFork")(function* (
       slug: Slug.create(),
       directory: parent.directory,
       path: parent.path,
-      title: forkTitle(parent.title ?? undefined),
+      title: draftTitle ?? forkTitle(parent.title ?? undefined),
       agent: parent.agent,
       model: parent.model,
-      metadata: parent.metadata,
+      metadata:
+        draftTitle === undefined
+          ? parent.metadata
+          : {
+              ...parent.metadata,
+              [SessionForkTitle.key]: { sessionID: event.data.sessionID, fallback: draftTitle, after: copiedSeq ?? 0 },
+            },
       permission: parent.permission,
       version: parent.version,
       cost: 0,

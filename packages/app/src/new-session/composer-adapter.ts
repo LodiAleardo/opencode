@@ -1,7 +1,6 @@
 import { Predicate } from "effect"
 import { base64Encode } from "@opencode/util/encode"
 import { Session } from "@opencode/schema/session"
-import { SessionForkTitle } from "@opencode/schema/session-fork-title"
 import { TextBoundary } from "@opencode/util/text-boundary"
 import { createMemo, createSignal, onCleanup, startTransition, untrack } from "solid-js"
 import type {
@@ -17,8 +16,9 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { useLocal } from "@/providers/models/selection"
 import { useData, useServer } from "@/runtime/server/current"
 import { useServerSDK } from "@/runtime/server/client"
+import { supportsDraftForks } from "@/runtime/server/health-machine"
 import { useTabs, type DraftTab } from "@/shell/tabs/tabs"
-import { createForkAction } from "@/session/fork-action"
+import { createForkAction, FORK_DISPOSED } from "@/session/fork-action"
 import { createWorktree } from "@/workspaces/create"
 import { showToast } from "@/shell/notifications/toast"
 import type { DraftMcpControls } from "./mcp"
@@ -129,42 +129,31 @@ export function createNewSessionComposerAdapter(props: {
 
     if (!source || !forkAction) return
 
+    if (!supportsDraftForks(server.health)) {
+      showToast({ title: language.t("session.tab.forkDraft.unsupported") })
+
+      return
+    }
+
+    // The persisted draft identity stays the same even if a committed fork's response is lost.
+    const id = `ses_${props.draftID}`
+
     const session = await forkAction.fork(
       { type: "fork.requested", sessionID: source.sessionID, messageID: source.messageID },
       async (sessionID, before, signal) => {
-        const fork = await serverSDK.api.session.fork({ sessionID, before }, { signal })
         const title = forkPromptTitle(message.text) || language.t("session.tab.fork")
 
-        const metadata = {
-          ...fork.metadata,
-          [SessionForkTitle.key]: { sessionID: fork.id, messageID: message.id, fallback: title },
-        }
+        // Let an acknowledged late write settle after close, as for normal draft creation.
+        // The UI timeout still ends the attempt; a retry addresses the same fork.
+        const fork = await serverSDK.api.session.fork(
+          { sessionID, before, experimental: { id, title } },
+          { signal: AbortSignal.timeout(60_000) },
+        )
 
-        const named =
-          draftOpen() && !signal.aborted
-            ? await serverSDK.api.session
-                .update(
-                  { sessionID: fork.id, title, metadata },
-                  { signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]) },
-                )
-                .then(
-                  () => ({ ...fork, title, metadata }),
-                  (error) => {
-                    if (!signal.aborted)
-                      showToast({
-                        title: language.t("common.requestFailed"),
-                        description: errorMessage(language, error),
-                      })
+        // Only a closed draft abandons a known fork. A timed-out attempt leaves it for the retry to adopt.
+        if (signal.reason === FORK_DISPOSED) void data.session.remove(fork.id).catch(() => undefined)
 
-                    return fork
-                  },
-                )
-            : fork
-
-        // The fork API assigns the new ID. If the draft closed while the request was running, undo the copy.
-        if (signal.aborted) void data.session.remove(fork.id).catch(() => undefined)
-
-        return named
+        return fork
       },
     )
 

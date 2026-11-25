@@ -3,6 +3,7 @@ import type { SessionMessageInfo } from "@opencode/client/promise"
 import { useParams } from "@solidjs/router"
 import { useData } from "@/runtime/server/current"
 import { useDialog } from "@opencode/ui/context/dialog"
+import { Button } from "@opencode/ui/button"
 import { Dialog, DialogBody, DialogTitle, DialogTitleGroup } from "@opencode/ui/dialog"
 import { useFilteredList } from "@opencode/ui/hooks"
 import { Icon } from "@opencode/ui/icon"
@@ -79,6 +80,7 @@ export function ForkDialog(props: {
   messages: ForkableMessage[]
   disabled?: boolean
   loading?: boolean
+  retryHistory?: () => void
   pendingMessageID?: string
   onSelect: (messageID: string) => void
 }) {
@@ -159,7 +161,10 @@ export function ForkDialog(props: {
               <div class="search-list-empty">
                 <Show
                   when={props.loading}
-                  fallback={language.t(props.messages.length > 0 ? "dialog.fork.search.empty" : "dialog.fork.empty")}
+                  fallback={
+                    !props.retryHistory &&
+                    language.t(props.messages.length > 0 ? "dialog.fork.search.empty" : "dialog.fork.empty")
+                  }
                 >
                   <Loader />
                 </Show>
@@ -200,6 +205,16 @@ export function ForkDialog(props: {
             </div>
           </Show>
         </MenuScroll>
+        <Show when={props.retryHistory}>
+          {(retry) => (
+            <div class="flex shrink-0 items-center justify-between gap-2 px-3 pb-2">
+              <span role="status">{language.t("dialog.fork.historyFailed")}</span>
+              <Button size="small" variant="ghost-muted" onClick={retry()}>
+                {language.t("common.retry")}
+              </Button>
+            </div>
+          )}
+        </Show>
       </DialogBody>
     </Dialog>
   )

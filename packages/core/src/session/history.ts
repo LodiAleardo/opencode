@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm"
 import { Message } from "@opencode/ai/effect"
 import { Effect, Option, Schema } from "effect"
 import type { Model } from "@opencode/schema/model"
@@ -388,6 +388,7 @@ export const incompleteAssistants = Effect.fn("SessionHistory.incompleteAssistan
 export const firstUserMessage = Effect.fn("SessionHistory.firstUserMessage")(function* (
   db: DatabaseService,
   sessionID: SessionSchema.ID,
+  after?: number,
 ) {
   const row = yield* db
     .select({
@@ -395,7 +396,13 @@ export const firstUserMessage = Effect.fn("SessionHistory.firstUserMessage")(fun
       text: sql<unknown>`json_extract(${SessionMessageTable.data}, '$.text')`,
     })
     .from(SessionMessageTable)
-    .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "user")))
+    .where(
+      and(
+        eq(SessionMessageTable.session_id, sessionID),
+        eq(SessionMessageTable.type, "user"),
+        after === undefined ? undefined : gt(SessionMessageTable.seq, after),
+      ),
+    )
     .orderBy(asc(SessionMessageTable.seq))
     .get()
     .pipe(Effect.orDie)

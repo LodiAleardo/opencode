@@ -126,7 +126,10 @@ export async function checkServerHealth(
     })
       .server.info({ signal })
       .then((status) => ({
-        data: { type: "healthy" as const, version: status.version, hostname: status.hostname },
+        data: Object.assign(
+          { type: "healthy" as const, version: status.version, hostname: status.hostname ?? undefined },
+          status.capabilities?.draftForks === true ? { draftForks: true as const } : undefined,
+        ),
       }))
       .catch((error) => ({ error }))
 

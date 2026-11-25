@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 import { UnauthorizedError } from "../errors.js"
+import { optional } from "@opencode/schema/schema"
 
 export const ServerInfo = Schema.Struct({
   version: Schema.String,
@@ -16,6 +17,7 @@ export const ServerInfo = Schema.Struct({
   capabilities: Schema.optional(
     Schema.Struct({
       persistentPty: Schema.optional(Schema.Boolean),
+      draftForks: optional(Schema.Boolean),
     }),
   ),
 }).annotate({ identifier: "ServerInfo" })

@@ -784,6 +784,7 @@ export function DraftTabItem(
           data-titlebar-tab-link
           href={props.href}
           draggable={false}
+          aria-current={props.active ? "page" : undefined}
           onDragStart={(event) => {
             event.preventDefault()
             event.stopPropagation()

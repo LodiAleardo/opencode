@@ -3,10 +3,10 @@ export type JsonValue = null | boolean | number | string | Array<JsonValue> | { 
 export type ServerInfo = {
   version: string
   pid: number
-  hostname?: string | undefined
+  hostname?: string | null
   urls: Array<string>
   paths: { tmp: string }
-  capabilities?: { persistentPty?: boolean | undefined } | undefined
+  capabilities?: { persistentPty?: boolean | null; draftForks?: boolean } | null
 }
 
 export type PairingCode = { code: string; expires_in: number }
@@ -1339,6 +1339,7 @@ export type SessionForked = {
     sessionID: SessionID
     parentID: SessionID
     boundary: SessionForkBoundary
+    draftTitle?: string
     instructions?: { [x: InstructionKey]: InstructionHash }
     instructionEntries?: InstructionEntrySnapshot
   }
@@ -3519,7 +3520,11 @@ export type SessionRemoveInput = { readonly sessionID: string }
 
 export type SessionRemoveOutput = void
 
-export type SessionForkInput = { readonly sessionID: string; readonly before?: string | undefined }
+export type SessionForkInput = {
+  readonly sessionID: string
+  readonly before?: string | undefined
+  readonly experimental?: { readonly id: string; readonly title?: string } | undefined
+}
 
 export type SessionForkOutput = { data: SessionInfo }["data"]
 

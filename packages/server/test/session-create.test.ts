@@ -63,3 +63,31 @@ it.live("returns not found when creating a child of a missing session", () =>
     })
   }).pipe(Effect.scoped),
 )
+
+it.live("returns a conflict when a fork would reuse an unrelated session ID", () =>
+  Effect.gen(function* () {
+    const handler = yield* ServerFetch.make({
+      app: { version: "test" },
+      database: { path: ":memory:" },
+      fs: { filewatcher: false },
+    })
+    const post = (path: string, body: object) =>
+      Effect.promise(() =>
+        handler(
+          new Request(`http://opencode.local/api/session${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        ),
+      )
+
+    const id = Session.ID.create()
+    const existing = yield* post("", { id })
+    expect(existing.status).toBe(200)
+
+    const response = yield* post(`/${id}/fork`, { experimental: { id } })
+    expect(response.status).toBe(409)
+    expect(yield* Effect.promise(() => response.json())).toMatchObject({ _tag: "ConflictError", resource: id })
+  }).pipe(Effect.scoped),
+)

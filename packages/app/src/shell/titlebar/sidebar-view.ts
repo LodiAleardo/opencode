@@ -204,7 +204,7 @@ function leaf<R extends SidebarRow>(
     ...bucket,
     rows,
     collapsed: !!collapsed[bucket.key],
-    open: bucket.rows.filter((row) => row.open).length,
+    open: rows.filter((row) => row.open).length,
     spansServers: bucket.kind === "project" && new Set(rows.map((row) => row.server)).size > 1,
     children: undefined,
   }

@@ -53,7 +53,9 @@ export type ServerInfoOutput = {
   readonly hostname?: string | undefined
   readonly urls: ReadonlyArray<string>
   readonly paths: { readonly tmp: string }
-  readonly capabilities?: { readonly persistentPty?: boolean | undefined } | undefined
+  readonly capabilities?:
+    | { readonly persistentPty?: boolean | undefined; readonly draftForks?: boolean | undefined }
+    | undefined
 }
 export type ServerInfoOperation<E = never> = () => Effect.Effect<ServerInfoOutput, E>
 
@@ -174,7 +176,11 @@ export type SessionRemoveInput = { readonly sessionID: Session.ID }
 export type SessionRemoveOutput = void
 export type SessionRemoveOperation<E = never> = (input: SessionRemoveInput) => Effect.Effect<SessionRemoveOutput, E>
 
-export type SessionForkInput = { readonly sessionID: Session.ID; readonly before?: SessionMessage.ID | undefined }
+export type SessionForkInput = {
+  readonly sessionID: Session.ID
+  readonly before?: SessionMessage.ID | undefined
+  readonly experimental?: { readonly id: Session.ID; readonly title?: string | undefined } | undefined
+}
 export type SessionForkOutput = Session.Info
 export type SessionForkOperation<E = never> = (input: SessionForkInput) => Effect.Effect<SessionForkOutput, E>
 
@@ -779,6 +785,7 @@ export type ExperimentalSessionLogOutput =
             readonly sessionID: Session.ID
             readonly parentID: Session.ID
             readonly boundary: Session.ForkBoundary
+            readonly draftTitle?: string | undefined
             readonly instructions?: { readonly [x: Instruction.Key]: Instruction.Hash } | undefined
             readonly instructionEntries?: InstructionEntry.Snapshot | undefined
           }

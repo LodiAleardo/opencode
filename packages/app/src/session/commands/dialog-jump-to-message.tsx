@@ -17,6 +17,7 @@ import {
   type JumpToMessageEffect,
   type JumpToMessageEvent,
 } from "./jump-to-message-machine"
+import { readUserMessageHistory } from "./user-message-history"
 
 function prompt(message: SessionMessageUser, attachment: string): JumpPrompt {
   const presentation = readPromptPresentation(message.metadata)
@@ -106,31 +107,14 @@ export function DialogJumpToMessage(props: {
 
   // Read older prompts into the picker only. Prepending pages to the timeline while browsing would move the reader.
   const loadHistory = async (signal: AbortSignal) => {
-    const rows: JumpPrompt[] = []
-
     // Join the timeline's initial sync before interpreting a missing cursor as the end of history.
     await data.session.message.sync(id)
     signal.throwIfAborted()
 
-    if (!data.session.message.more(id)) return rows
-    let cursor: string | undefined
+    if (!data.session.message.more(id)) return []
+    const history = await readUserMessageHistory(sdk.api.message, id, signal)
 
-    do {
-      const page = await sdk.api.message.list(
-        { sessionID: id, type: "user", limit: 200, cursor },
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) },
-      )
-
-      signal.throwIfAborted()
-
-      for (const message of page.data) {
-        if (message.type === "user") rows.push(prompt(message, language.t("common.attachment")))
-      }
-
-      cursor = page.cursor.next ?? undefined
-    } while (cursor)
-
-    return rows
+    return history.map((message) => prompt(message, language.t("common.attachment")))
   }
 
   // Page back only as far as the prompt, so the rest of a long session stays unloaded.

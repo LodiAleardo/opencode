@@ -301,9 +301,23 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
     .add(
       HttpApiEndpoint.post("session.fork", "/api/session/:sessionID/fork", {
         params: { sessionID: Session.ID },
-        payload: Schema.Struct({ before: SessionMessage.ID.pipe(Schema.optional) }),
+        payload: Schema.Struct({
+          before: optional(SessionMessage.ID),
+          experimental: optional(
+            Schema.Struct({
+              id: Session.ID.annotate({
+                description: "Experimental: destination session ID. Retrying the same fork with this ID reuses it.",
+              }),
+              title: optional(
+                Schema.String.annotate({
+                  description: "Experimental: initial draft title. The runner names the fork from its first new prompt.",
+                }),
+              ),
+            }),
+          ),
+        }),
         success: Schema.Struct({ data: PublicSessionInfo }),
-        error: [SessionNotFoundError, MessageNotFoundError, InvalidRequestError],
+        error: [SessionNotFoundError, MessageNotFoundError, InvalidRequestError, ConflictError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "session.fork",

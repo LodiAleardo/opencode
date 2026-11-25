@@ -15,4 +15,9 @@ export const CollapsedCurrentProject = {
   render: (args: Args) => <NavigationStory preset="collapsed" width={args.width} />,
 }
 
-export const SessionForks = { render: (args: Args) => <NavigationStory preset="forks" width={args.width} /> }
+export const SessionForks = {
+  args: { draftForks: true },
+  render: (args: Args & { draftForks: boolean }) => (
+    <NavigationStory preset="forks" width={args.width} draftForks={args.draftForks} />
+  ),
+}

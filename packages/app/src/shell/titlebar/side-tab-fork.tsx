@@ -1,30 +1,35 @@
 import type { SessionInfo } from "@opencode/client/promise"
-import { createMemo, createResource } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Menu } from "@opencode/ui/menu"
 import { useLanguage } from "@/runtime/i18n/language"
+import { supportsDraftForks } from "@/runtime/server/health-machine"
 import type { ServerConnection } from "@/runtime/server/registry"
 import { useGlobal, type ServerCtx } from "@/runtime/server/runtime"
 import { ForkDialog, forkableMessages } from "@/session/commands/fork-dialog"
+import { readUserMessageHistory } from "@/session/commands/user-message-history"
 import { sessionLabel } from "@/session/title"
-import { showToast } from "@/shell/notifications/toast"
 import { useTabs } from "@/shell/tabs/tabs"
+import { forkPickerView, initialForkPicker, transitionForkPicker, type ForkPickerEvent } from "./fork-picker-machine"
 
 export function createSideTabFork() {
   const global = useGlobal()
   const tabs = useTabs()
   const dialog = useDialog()
 
+  const available = (server: ServerConnection.Key) =>
+    supportsDraftForks(global.servers.health[server]) && global.serverCtx(server)?.sdk.connection.status() === "connected"
+
   return {
-    available: (server: ServerConnection.Key) => global.serverCtx(server)?.sdk.connection.status() === "connected",
+    available,
     run(server: ServerConnection.Key, session: SessionInfo) {
       const ctx = global.serverCtx(server)
 
-      if (!ctx) return
+      if (!ctx || !available(server)) return
 
       dialog.show(() => (
         <ForkDraftPicker
-          data={ctx.data}
+          ctx={ctx}
           sessionID={session.id}
           onSelect={(messageID) => {
             dialog.close()
@@ -41,20 +46,52 @@ export function createSideTabFork() {
   }
 }
 
-function ForkDraftPicker(props: { data: ServerCtx["data"]; sessionID: string; onSelect: (messageID: string) => void }) {
-  const language = useLanguage()
-  const messages = createMemo(() => forkableMessages(props.data.session.message.list(props.sessionID)))
+function ForkDraftPicker(props: { ctx: ServerCtx; sessionID: string; onSelect: (messageID: string) => void }) {
+  const dialog = useDialog()
+  const [state, setState] = createSignal(initialForkPicker)
+  const dispatch = (event: ForkPickerEvent) => setState((current) => transitionForkPicker(current, event))
+  const view = createMemo(() => forkPickerView(state()))
 
-  const [load] = createResource(async () => {
-    // A refresh would replace any older pages already loaded in the source chat.
-    if (props.data.session.message.list(props.sessionID).length > 0) return
+  const messages = createMemo(() => {
+    const cached = props.ctx.data.session.message.list(props.sessionID)
+    const history = new Map(view().history.toReversed().map((message) => [message.id, message]))
 
-    await props.data.session.message.sync(props.sessionID).catch(() => {
-      showToast({ title: language.t("common.requestFailed") })
-    })
+    for (const message of cached) {
+      if (message.type === "user" && !props.ctx.data.session.input.has(props.sessionID, message.id))
+        history.set(message.id, message)
+    }
+
+    return forkableMessages([...history.values()].toSorted((a, b) => a.time.created - b.time.created))
   })
 
-  return <ForkDialog messages={messages()} loading={load.loading} onSelect={props.onSelect} />
+  createEffect(
+    on(state, (request) => {
+      if (request.status !== "loading") return
+
+      const controller = new AbortController()
+      onCleanup(() => controller.abort())
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)])
+
+      void readUserMessageHistory(props.ctx.sdk.api.message, props.sessionID, signal).then(
+        (history) => dispatch({ type: "loaded", attempt: request.attempt, history }),
+        () => dispatch({ type: "failed", attempt: request.attempt }),
+      )
+    }),
+  )
+
+  createEffect(() => {
+    if (dialog.closing) dispatch({ type: "disposed" })
+  })
+  onCleanup(() => dispatch({ type: "disposed" }))
+
+  return (
+    <ForkDialog
+      messages={messages()}
+      loading={view().loading}
+      retryHistory={view().failed ? () => dispatch({ type: "retry" }) : undefined}
+      onSelect={props.onSelect}
+    />
+  )
 }
 
 export function SideTabForkItem(props: {

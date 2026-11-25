@@ -3,7 +3,6 @@ export * as SessionTitle from "./title.js"
 import { isDeepStrictEqual } from "node:util"
 import { LLMClient, LLMEvent, Message, SystemPart } from "@opencode/ai/effect"
 import type { Agent } from "@opencode/schema/agent"
-import type { SessionMessage } from "@opencode/schema/session-message"
 import { SessionForkTitle } from "@opencode/schema/session-fork-title"
 import { Context, DateTime, Effect, Layer, Option, Schema, Stream } from "effect"
 import { Database } from "../database/database.js"
@@ -27,7 +26,7 @@ const titleChanged = Symbol("Session title changed")
 
 export interface Interface {
   /** Generates an initial title or regenerates one from bounded conversation history. */
-  readonly generate: (sessionID: SessionSchema.ID, forkPrompt?: SessionMessage.ID) => Effect.Effect<void>
+  readonly generate: (sessionID: SessionSchema.ID, nameFork?: boolean) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionTitle") {}
@@ -52,7 +51,7 @@ export function pendingForkTitle(session: SessionSchema.Info) {
   const request = Option.getOrUndefined(decodeForkTitle(session.metadata?.[SessionForkTitle.key]))
 
   // Forks inherit metadata. A request only belongs to the session that recorded it, and a manual rename cancels it.
-  if (request?.sessionID === session.id && request.fallback === session.title) return request.messageID
+  if (request?.sessionID === session.id && request.fallback === session.title) return request
 }
 
 export const layer = Layer.effect(
@@ -127,23 +126,24 @@ export const layer = Layer.effect(
 
     const generate = Effect.fn("SessionTitle.generate")(function* (
       sessionID: SessionSchema.ID,
-      forkPrompt?: SessionMessage.ID,
+      nameFork = false,
     ) {
       const session = yield* store.get(sessionID)
       if (!session) return
-      if (forkPrompt !== undefined && pendingForkTitle(session) !== forkPrompt) return
-      const firstUser = forkPrompt
+      const fork = nameFork ? pendingForkTitle(session) : undefined
+      if (nameFork && !fork) return
+      const firstUser = fork && "messageID" in fork
         ? yield* store
-            .message(forkPrompt)
+            .message(fork.messageID)
             .pipe(
               Effect.map((entry) =>
                 entry?.sessionID === sessionID && entry.message.type === "user" ? entry.message : undefined,
               ),
             )
-        : yield* SessionHistory.firstUserMessage(db, session.id)
+        : yield* SessionHistory.firstUserMessage(db, session.id, fork?.after)
       if (!firstUser) return
       const text =
-        !forkPrompt && !isUntitled(session)
+        !fork && !isUntitled(session)
           ? yield* store.context(session.id).pipe(
               Effect.map((messages) => {
                 const original = `Original request:\n${TextBoundary.head(firstUser.text, MAX_FIRST_MESSAGE_LENGTH)}`
@@ -165,7 +165,7 @@ export const layer = Layer.effect(
               }),
               Effect.orElseSucceed(() => messagePrompt(firstUser.text)),
             )
-          : messagePrompt(forkPrompt ? TextBoundary.head(firstUser.text, MAX_FIRST_MESSAGE_LENGTH) : firstUser.text)
+          : messagePrompt(fork ? TextBoundary.head(firstUser.text, MAX_FIRST_MESSAGE_LENGTH) : firstUser.text)
       const selection = yield* context.selectTitle(session)
       if (!selection) return
       const title =
@@ -176,17 +176,22 @@ export const layer = Layer.effect(
       if (!title) return
       const expectedSequence = (yield* Bus.latestSequence(db, sessionID)) + 1
       const current = yield* store.get(sessionID)
-      if (!current || current.title !== session.title || current.title === truncate(title)) return
-      yield* bus
-        .publish(
-          SessionEvent.Renamed,
-          {
-            sessionID: session.id,
-            title: truncate(title),
-          },
-          { commit: (sequence) => (sequence === expectedSequence ? Effect.void : Effect.die(titleChanged)) },
-        )
-        .pipe(Effect.catchDefect((defect) => (defect === titleChanged ? Effect.void : Effect.die(defect))))
+      if (!current || current.title !== session.title) return
+      const next = truncate(title)
+      const guard = { commit: (sequence: number) => (sequence === expectedSequence ? Effect.void : Effect.die(titleChanged)) }
+      const rename = { sessionID, title: next }
+      const update = () => {
+        if (!fork) return current.title === next ? Effect.void : bus.publish(SessionEvent.Renamed, rename, guard)
+
+        if (!isDeepStrictEqual(pendingForkTitle(current), fork)) return Effect.void
+        const metadata = { ...current.metadata }
+        delete metadata[SessionForkTitle.key]
+        const resolved = { sessionID, metadata }
+        return current.title === next
+          ? bus.publish(SessionEvent.MetadataUpdated, resolved, guard)
+          : bus.publishAll([[SessionEvent.Renamed, rename, guard], [SessionEvent.MetadataUpdated, resolved]])
+      }
+      yield* update().pipe(Effect.catchDefect((defect) => (defect === titleChanged ? Effect.void : Effect.die(defect))))
     })
     return Service.of({ generate })
   }),

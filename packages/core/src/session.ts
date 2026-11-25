@@ -33,6 +33,7 @@ import {
   AttachmentError,
   BusyError,
   CompactionConflictError,
+  ForkConflictError,
   ForkEmptyError,
   InboxConflictError,
   InvalidListCursorError,
@@ -106,12 +107,15 @@ type CompactInput = Parameters<Session.Handle["compact"]>[0] & { sessionID: Sess
 type ForkInput = {
   sessionID: SessionSchema.ID
   before?: SessionMessage.ID
+  id?: SessionSchema.ID
+  draftTitle?: string
 }
 
 export {
   AttachmentError,
   BusyError,
   CompactionConflictError,
+  ForkConflictError,
   ForkEmptyError,
   InboxConflictError,
   InvalidListCursorError,
@@ -139,7 +143,7 @@ export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly fork: (
     input: ForkInput,
-  ) => Effect.Effect<SessionSchema.Info, NotFoundError | MessageNotFoundError | ForkEmptyError>
+  ) => Effect.Effect<SessionSchema.Info, NotFoundError | MessageNotFoundError | ForkEmptyError | ForkConflictError>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly environment: (input: {
     readonly sessionID: SessionSchema.ID
@@ -356,6 +360,24 @@ const layer = Layer.effect(
         return yield* result.get(sessionID).pipe(Effect.orDie)
       }),
       fork: Effect.fn("Session.fork")(function* (input) {
+        const sessionID = input.id ?? SessionSchema.ID.create()
+        const reuse = (recorded: SessionSchema.Info) => {
+          const fork = recorded.fork
+          if (
+            fork?.sessionID === input.sessionID &&
+            (input.before === undefined
+              ? fork.boundary.type === "through"
+              : fork.boundary.type === "before" && fork.boundary.messageID === input.before)
+          )
+            return Effect.succeed(recorded)
+
+          return Effect.fail(new ForkConflictError({ sessionID }))
+        }
+        if (input.id) {
+          const recorded = yield* store.get(sessionID)
+          if (recorded) return yield* reuse(recorded)
+        }
+
         const parent = yield* result.get(input.sessionID)
         const boundary = yield* db
           .select({ id: SessionMessageTable.id })
@@ -376,7 +398,6 @@ const layer = Layer.effect(
             messageID: input.before,
           })
         if (!boundary) return yield* new ForkEmptyError({ sessionID: input.sessionID })
-        const sessionID = SessionSchema.ID.create()
         const inherited = yield* db
           .transaction(() =>
             Effect.all({
@@ -390,14 +411,24 @@ const layer = Layer.effect(
         // instruction-update text the initial baseline already reflects.
         // The parent's location, not the caller's, decides whether the copy's media is stored as blobs.
         const media = yield* mediaBlob(parent)
-        yield* bus
+        const existing = yield* bus
           .publish(SessionEvent.Forked, {
             sessionID,
             parentID: parent.id,
             boundary: { type: input.before ? "before" : "through", messageID: boundary.id },
+            draftTitle: input.draftTitle,
             ...inherited,
           })
-          .pipe(Effect.provideService(SessionBlob.ForkMedia, media))
+          .pipe(
+            Effect.provideService(SessionBlob.ForkMedia, media),
+            Effect.as(undefined),
+            Effect.catchDefect((defect) =>
+              input.id && defect instanceof SessionProjector.SessionAlreadyProjected
+                ? result.get(sessionID).pipe(Effect.flatMap(reuse))
+                : Effect.die(defect),
+            ),
+          )
+        if (existing) return existing
         const forked = yield* result.get(sessionID).pipe(Effect.orDie)
         yield* Effect.gen(function* () {
           yield* Plugin.awaitActivation

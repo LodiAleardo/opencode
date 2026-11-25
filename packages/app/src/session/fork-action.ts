@@ -14,6 +14,8 @@ import {
 
 type Request = Extract<SessionForkEvent, { type: "fork.requested" }>
 
+export const FORK_DISPOSED = Symbol("Fork closed")
+
 export function createForkAction(surface: SessionForkSurface, onClose?: () => void) {
   const language = useLanguage()
 
@@ -43,7 +45,8 @@ export function createForkAction(surface: SessionForkSurface, onClose?: () => vo
   const run = (effect: SessionForkEffect) => {
     if (effect.type === "fork.start") return
 
-    if (effect.type === "fork.cancel") return settle(effect.attempt)?.controller.abort()
+    if (effect.type === "fork.cancel")
+      return settle(effect.attempt)?.controller.abort(machine().status === "closed" ? FORK_DISPOSED : undefined)
 
     if (effect.type === "fork.open") return settle(effect.attempt, effect.session)?.open?.(effect.session, effect.draft)
 

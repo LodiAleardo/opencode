@@ -55,7 +55,7 @@ const sessions = [
 
 // All fetches and writes belong to one mount. The rest of the server (including the event stream)
 // comes from the same fixture the standalone dialog stories use.
-function navigationFetch(onFork: () => void): typeof fetch {
+function navigationFetch(onFork: () => void, draftForks: boolean): typeof fetch {
   const fallback = createStoryFetch()
 
   const records = new Map(sessions.map((item) => [item.id, structuredClone(item)]))
@@ -64,6 +64,15 @@ function navigationFetch(onFork: () => void): typeof fetch {
     const request = new Request(input, init)
 
     const url = new URL(request.url)
+
+    if (url.pathname === "/api/info" && draftForks)
+      return Response.json({
+        version: "2.0.0",
+        pid: 1,
+        urls: [request.url],
+        paths: { tmp: "/tmp/opencode" },
+        capabilities: { draftForks: true },
+      })
 
     if (url.pathname === "/api/project") return Response.json(projects)
 
@@ -87,14 +96,19 @@ function navigationFetch(onFork: () => void): typeof fetch {
 
     if (!record) return new Response(null, { status: 404 })
 
-    if (match[2] === "message")
+    if (match[2] === "message") {
+      const older = url.searchParams.get("cursor") === "older"
+      const source = record.id === "ses_sidebar"
+
       return Response.json({
-        data:
-          record.id === "ses_sidebar"
-            ? [{ id: "msg_story", type: "user", text: "Improve keyboard navigation", time: { created: idle } }]
-            : [],
-        cursor: {},
+        data: !source
+          ? []
+          : older
+            ? [{ id: "msg_older", type: "user", text: "Prototype focus restoration", time: { created: idle - 1 } }]
+            : [{ id: "msg_story", type: "user", text: "Improve keyboard navigation", time: { created: idle } }],
+        cursor: { next: source && !older ? "older" : undefined },
       })
+    }
 
     if (match[2] === "view") record.time.viewed = record.time.idle
 
@@ -116,7 +130,7 @@ function navigationFetch(onFork: () => void): typeof fetch {
 
 type Preset = "sessions" | "draft" | "crowded" | "projects" | "collapsed" | "forks"
 
-export function NavigationStory(props: { preset: Preset; width: number }) {
+export function NavigationStory(props: { preset: Preset; width: number; draftForks?: boolean }) {
   const [forkRequests, setForkRequests] = createSignal(0)
   const draft: Tab = { type: "draft", server, directory: STORY_DIRECTORY, draftID: "navigation-draft" }
 
@@ -143,7 +157,7 @@ export function NavigationStory(props: { preset: Preset; width: number }) {
     notify: async () => {},
     restart: async () => {},
     storage,
-    fetch: navigationFetch(() => setForkRequests((count) => count + 1)),
+    fetch: navigationFetch(() => setForkRequests((count) => count + 1), props.draftForks ?? false),
   }
 
   const history = createMemoryHistory()

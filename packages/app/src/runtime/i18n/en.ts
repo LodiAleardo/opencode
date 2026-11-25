@@ -416,6 +416,7 @@ export const dict = {
   "mcp.timedOut": "{{name}} took too long to respond",
 
   "dialog.fork.empty": "No messages to fork from",
+  "dialog.fork.historyFailed": "Couldn’t load the full history.",
   "dialog.jump.title": "Jump to message",
   "dialog.jump.description": "Choose a message to jump to",
   "command.session.jumpToMessage.description": "Search sent prompts in this session",
@@ -639,6 +640,7 @@ export const dict = {
   "session.tab.fork": "Fork",
   "session.tab.forkDraft": "Fork draft",
   "session.tab.forkDraft.preview": "Fork draft · This branch is created when you send your first message.",
+  "session.tab.forkDraft.unsupported": "This server doesn’t support fork drafts. Update OpenCode on the server.",
   "session.tab.forkDraft.historyEmpty": "There are no earlier messages at this fork point.",
   "session.tab.forkDraft.historyUnavailable": "Couldn’t load the conversation at this fork point.",
   "session.tab.forkTitle": "{{title}} (fork {{branch}})",

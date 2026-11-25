@@ -158,7 +158,10 @@ describe("sidebarView", () => {
 
     const show = { recent: true, subagents: false, serverLabels: false }
 
-    expect(keys(rows, state({ show }))).toEqual(["source", "fork", "grandchild"])
+    const view = sidebarView(rows, state({ show, collapsed: { all: true } }))
+
+    expect(view.groups[0]?.rows.map((item) => item.key)).toEqual(["source", "fork", "grandchild"])
+    expect(view.groups[0]?.open).toBe(2)
     expect(keys(rows, state({ show: { ...show, recent: false } }))).toEqual(["fork", "grandchild"])
   })
 

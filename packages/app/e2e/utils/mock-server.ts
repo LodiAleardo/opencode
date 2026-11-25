@@ -165,6 +165,8 @@ export interface MockServerConfig {
   // POST /api/session/:id/fork creates `<id>_fork` in the same directory. The hook may hold the request, or return an
   // answer to replace the response.
   onFork?: (input: { sessionID: string; body: Schema.JsonObject }) => void | MockAnswer | Promise<void | MockAnswer>
+  afterFork?: (sessionID: string) => void | MockAnswer
+  draftForks?: boolean
   generate?: (input: { sessionID: string; prompt: string }) => { text: string } | Promise<{ text: string }>
   onInboxChange?: (input: { sessionID: string; inboxID: string; action: "cancel" | "steer" | "queue" }) => void
   onBackground?: (input: { sessionID: string }) => void
@@ -776,14 +778,21 @@ function mockHandlers(
           if (answer) return HttpServerResponse.jsonUnsafe(answer.body, { status: answer.status })
 
           const parent = config.sessions.find((item) => item.id === ctx.params.sessionID)
-          const id = `${ctx.params.sessionID}_fork`
+          const fields = Option.getOrUndefined(decodeSessionFork(body))
+          const id = fields?.experimental?.id ?? `${ctx.params.sessionID}_fork`
+          const recorded = config.sessions.find((item) => item.id === id)
+
+          if (recorded) return HttpServerResponse.jsonUnsafe({ data: currentSession(recorded, config.directory) })
 
           const forked = currentSession(
-            { ...parent, id, title: `${parent?.title ?? ctx.params.sessionID} (fork)` },
+            { ...parent, id, title: fields?.experimental?.title ?? `${parent?.title ?? ctx.params.sessionID} (fork)` },
             config.directory,
           )
 
-          if (!config.sessions.some((item) => item.id === id)) config.sessions.push(forked)
+          config.sessions.push(forked)
+          const failure = config.afterFork?.(id)
+
+          if (failure) return HttpServerResponse.jsonUnsafe(failure.body, { status: failure.status })
 
           return HttpServerResponse.jsonUnsafe({ data: forked })
         }),
@@ -796,10 +805,7 @@ function mockHandlers(
             hostname: config.hostname,
             urls: config.server ? [config.server] : [],
             paths: { tmp: "/tmp/opencode" },
-            capabilities:
-              state.persistentPty.capability === undefined
-                ? undefined
-                : { persistentPty: state.persistentPty.capability },
+            capabilities: { persistentPty: state.persistentPty.capability, draftForks: config.draftForks },
           }),
         config: () => Effect.succeed(configEntries),
         reference: () => Effect.succeed({ location: location(config), data: [] }),
@@ -1632,6 +1638,12 @@ const decodeWorktreeAnswer = Schema.decodeUnknownOption(Schema.Struct({ director
 
 const decodeSessionCreate = Schema.decodeUnknownOption(
   Schema.Struct({ id: lenient(Schema.String), title: lenient(Schema.String), parentID: lenient(Schema.String) }),
+)
+
+const decodeSessionFork = Schema.decodeUnknownOption(
+  Schema.Struct({
+    experimental: Schema.optionalKey(Schema.Struct({ id: Schema.String, title: Schema.optionalKey(Schema.String) })),
+  }),
 )
 
 const decodeSessionUpdate = Schema.decodeUnknownOption(

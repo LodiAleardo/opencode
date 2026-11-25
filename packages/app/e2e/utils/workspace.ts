@@ -88,6 +88,31 @@ export async function openDraft(
   return { ...workspace, draftID, editor }
 }
 
+// Start from a persisted fork draft: the sidebar creates these only in the desktop shell.
+export function openForkDraft(
+  page: Page,
+  input: WorkspaceInput & {
+    draftID: string
+    directory: string
+    fork: { sessionID: string; messageID: string; title: string }
+  },
+) {
+  return openDraft(page, {
+    draftForks: true,
+    ...input,
+    seed: {
+      ...input.seed,
+      storage: {
+        ...input.seed?.storage,
+        "opencode.window.browser.dat:tabs": [
+          { type: "session", server: SERVER, sessionId: input.fork.sessionID },
+          { type: "draft", server: SERVER, draftID: input.draftID, directory: input.directory, fork: input.fork },
+        ],
+      },
+    },
+  })
+}
+
 // The new-session trigger that shows the draft's project and opens the location dialog on its projects.
 export function newSessionLocation(page: Page) {
   return page.locator('[data-component="new-session"] [data-action="prompt-project"]')

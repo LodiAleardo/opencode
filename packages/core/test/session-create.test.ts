@@ -998,6 +998,33 @@ describe("Session.create", () => {
     }),
   )
 
+  it.effect("reuses a committed fork for the same destination ID and rejects a different boundary", () =>
+    Effect.gen(function* () {
+      const session = yield* Session.Service
+      const bus = yield* Bus.Service
+      const { db } = yield* Database.Service
+      const parent = yield* session.create({ location })
+      const first = yield* session.prompt({ sessionID: parent.id, text: "First", resume: false })
+      const second = yield* session.prompt({ sessionID: parent.id, text: "Second", resume: false })
+      yield* SessionInbox.promote(db, bus, parent.id, "steer")
+
+      const input = { sessionID: parent.id, before: second.id, id: Session.ID.create() }
+      const forks = yield* Effect.all([session.fork(input), session.fork(input)], { concurrency: 2 })
+      const retry = yield* session.fork(input)
+
+      expect(forks.map((fork) => fork.id)).toEqual([input.id, input.id])
+      expect(retry.id).toBe(input.id)
+      expect(yield* session.context(retry.id)).toMatchObject([Expected.user("First")])
+      expect(Array.from(yield* Stream.runCollect(logEvents(session, retry.id))).map((event) => event.type)).toEqual([
+        "session.forked",
+      ])
+      expect(yield* session.fork({ ...input, before: first.id }).pipe(Effect.flip)).toMatchObject({
+        _tag: "Session.ForkConflictError",
+        sessionID: input.id,
+      })
+    }),
+  )
+
   it.effect("returns the existing Session when one ID is reused with different create arguments", () =>
     Effect.gen(function* () {
       const session = yield* Session.Service

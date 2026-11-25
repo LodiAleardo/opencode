@@ -6,7 +6,7 @@ export const SERVER_HEALTH_POLL_MS = 10_000
 
 /** The answer of one `/api/info` probe. */
 export type ServerProbeResult =
-  | { readonly type: "healthy"; readonly version?: string; readonly hostname?: string }
+  | { readonly type: "healthy"; readonly version?: string; readonly hostname?: string; readonly draftForks?: true }
   | { readonly type: "unauthorized" }
   | { readonly type: "unreachable" }
 
@@ -145,6 +145,10 @@ export function selectServerHealth(slot: ServerHealthSlot): ServerHealth {
 
 export function isServerHealthy(health: ServerHealth | undefined) {
   return health?.type === "healthy"
+}
+
+export function supportsDraftForks(health: ServerHealth | undefined) {
+  return health?.type === "healthy" && health.draftForks === true
 }
 
 /** The server can be used: it answered, or nothing says it cannot (not checked yet, or a check is in flight). */

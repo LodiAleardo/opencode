@@ -202,14 +202,25 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.fork",
         Effect.fn(function* (ctx) {
           return {
-            data: yield* session.fork({ sessionID: ctx.params.sessionID, before: ctx.payload.before }).pipe(
-              Effect.catchTag("Session.NotFoundError", missingSession),
-              Effect.catchTag("Session.MessageNotFoundError", missingMessage),
-              Effect.catchTag(
-                "Session.ForkEmptyError",
-                (error) => new InvalidRequestError({ message: error.message, kind: "empty_session" }),
+            data: yield* session
+              .fork({
+                sessionID: ctx.params.sessionID,
+                before: ctx.payload.before,
+                id: ctx.payload.experimental?.id,
+                draftTitle: ctx.payload.experimental?.title,
+              })
+              .pipe(
+                Effect.catchTag("Session.NotFoundError", missingSession),
+                Effect.catchTag("Session.MessageNotFoundError", missingMessage),
+                Effect.catchTag(
+                  "Session.ForkEmptyError",
+                  (error) => new InvalidRequestError({ message: error.message, kind: "empty_session" }),
+                ),
+                Effect.catchTag(
+                  "Session.ForkConflictError",
+                  (error) => new ConflictError({ resource: error.sessionID, message: error.message }),
+                ),
               ),
-            ),
           }
         }),
       )

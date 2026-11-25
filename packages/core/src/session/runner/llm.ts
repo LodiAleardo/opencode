@@ -204,13 +204,13 @@ const layer = Layer.effect(
                   )
                   // A control admitted during context preparation owns this boundary.
                   if (promoted === undefined) return undefined
-                  const forkPrompt = promoted > 0 ? SessionTitle.pendingForkTitle(selected.session) : undefined
+                  const nameFork = promoted > 0 && !!SessionTitle.pendingForkTitle(selected.session)
                   if (
                     promoted > 0 &&
                     !selected.session.parentID &&
-                    (forkPrompt || SessionTitle.isUntitled(selected.session))
+                    (nameFork || SessionTitle.isUntitled(selected.session))
                   )
-                    yield* FiberMap.run(titles, sessionID, title.generate(sessionID, forkPrompt), {
+                    yield* FiberMap.run(titles, sessionID, title.generate(sessionID, nameFork), {
                       onlyIfMissing: true,
                     })
                   if (promoted > 0) step = 1
