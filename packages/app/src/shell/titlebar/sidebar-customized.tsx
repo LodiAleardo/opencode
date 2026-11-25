@@ -229,6 +229,7 @@ export function SidebarCustomized(props: {
         open: true,
         active: isActive(tab.server, tab.sessionId),
         parentKey: undefined,
+        forkParentKey: session?.fork ? sessionRowKey(tab.server, session.fork.sessionID) : undefined,
         status: status(ctx, session),
         updated: session?.time.updated ?? 0,
         created: session?.time.created ?? 0,
@@ -271,6 +272,7 @@ export function SidebarCustomized(props: {
             open: false,
             active: isActive(server, session.id),
             parentKey: session.parentID ? sessionRowKey(server, session.parentID) : undefined,
+            forkParentKey: session.fork ? sessionRowKey(server, session.fork.sessionID) : undefined,
             status: status(ctx, session),
             updated: session.time.updated,
             created: session.time.created,
@@ -333,13 +335,15 @@ export function SidebarCustomized(props: {
 
   // Every row whose top-level ancestor is an open tab renders under that tab; the rest render in the group's footer.
   const anchorOf = (row: Row, byKey: Map<string, Row>): Row => {
-    const parent = row.parentKey ? byKey.get(row.parentKey) : undefined
+    const source = row.parentKey ?? row.forkParentKey
+    const parent = source ? byKey.get(source) : undefined
 
     return parent ? anchorOf(parent, byKey) : row
   }
 
   const depthOf = (row: Row, byKey: Map<string, Row>): number => {
-    const parent = row.parentKey ? byKey.get(row.parentKey) : undefined
+    const source = row.parentKey ?? row.forkParentKey
+    const parent = source ? byKey.get(source) : undefined
 
     return parent ? depthOf(parent, byKey) + 1 : 0
   }
@@ -351,9 +355,9 @@ export function SidebarCustomized(props: {
     })
   }
 
-  // Rows outside a project group carry their project's avatar, as open tabs always do; subagents follow their parent.
+  // Rows outside a project group carry their project's avatar, as open tabs always do; subagents and forks follow their source.
   const avatarOf = (row: Row, group: SidebarGroup<Row> | undefined) => {
-    if (group?.kind === "project" || row.parentKey || !row.projectID) return
+    if (group?.kind === "project" || row.parentKey || row.forkParentKey || !row.projectID) return
 
     return projectLabels().get(row.projectID) ?? row.project
   }

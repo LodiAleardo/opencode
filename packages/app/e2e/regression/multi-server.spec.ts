@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Locator, type Page } from "@playwright/test"
 import {
   REMOTE_SERVER,
   SERVER,
@@ -464,6 +464,54 @@ test("customized vertical sidebar merges a project across servers and narrows it
   await page.getByRole("button", { name: "View options" }).click()
   await menu.getByRole("menuitem", { name: "Reset filters" }).click()
   await expect(sidebar.getByRole("button", { name: recent.title })).toBeVisible()
+})
+
+test("indents a fork under the session it was forked from in the customized sidebar", async ({ page }) => {
+  const origin = session({ id: "ses_fork_origin", directory: directoryA, title: "Refactor the queue" })
+
+  const fork = session({
+    id: "ses_fork_origin_branch",
+    directory: directoryA,
+    title: "Refactor the queue (fork #1)",
+    created: T0 - 60_000,
+    fork: { sessionID: origin.id, boundary: { type: "through", messageID: "msg_fork_boundary" } },
+  })
+
+  const unrelated = session({ id: "ses_fork_unrelated", directory: directoryA, title: "Unrelated work", created: T0 - 120_000 })
+
+  await mockServers(page, {
+    [SERVER]: {
+      directory: directoryA,
+      project: project({ id: "proj_fork", directory: directoryA, name: "fork" }),
+      provider: { all: [], connected: [], default: {} },
+      sessions: [origin, fork, unrelated],
+      pageMessages: () => ({ items: [] }),
+    },
+  })
+  await seed(page, {
+    tabs: [origin.id],
+    settings: { appearance: { tabLayout: "vertical" }, general: { sidebarOrganize: "customize" } },
+  })
+  await page.goto(sessionHref(origin.id))
+  await expectSessionTitle(page, origin.title)
+
+  const sidebar = page.locator('[data-slot="vertical-tabs"]')
+  // The open session renders as a tab link; the fork and an unrelated recent session render as rows.
+  const originTab = sidebar.getByRole("link", { name: origin.title, exact: true })
+  const forkRow = sidebar.getByRole("button", { name: fork.title, exact: true })
+  const unrelatedRow = sidebar.getByRole("button", { name: unrelated.title, exact: true })
+
+  // The fork sits below the session it was forked from, indented one level deeper than a plain row.
+  await expect(forkRow).toBeVisible()
+
+  const padding = (row: Locator) =>
+    row.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingInlineStart))
+
+  expect(await padding(forkRow)).toBe((await padding(unrelatedRow)) + 14)
+
+  const [originBox, forkBox] = [await originTab.boundingBox(), await forkRow.boundingBox()]
+
+  expect(forkBox!.y).toBeGreaterThan(originBox!.y)
 })
 
 test("deleting a session's tab in the customized sidebar removes it from the list too", async ({ page }) => {

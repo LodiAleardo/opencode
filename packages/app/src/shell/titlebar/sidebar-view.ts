@@ -30,6 +30,8 @@ export type SidebarRow = {
   active: boolean
   /** The row key of the parent session, for subagent rows. */
   parentKey: string | undefined
+  /** The row key of the session this one was forked from, for fork rows. */
+  forkParentKey?: string
   status: SidebarStatus
   updated: number
   created: number
@@ -47,7 +49,7 @@ export type SidebarGroup<R extends SidebarRow> = {
   collapsed: boolean
   /** Open top-level rows in the group, including nested groups. */
   open: number
-  /** Leaf groups: sorted rows, subagents right after their parent. Server → Project parents: empty. */
+  /** Leaf groups: sorted rows, subagents and forks right after their source. Server → Project parents: empty. */
   rows: R[]
   /** A project group whose rows come from more than one server. */
   spansServers: boolean
@@ -71,14 +73,22 @@ export function sidebarView<R extends SidebarRow>(rows: readonly R[], state: Sid
   const keys = new Set(kept.map((row) => row.key))
 
   const children = Map.groupBy(
-    kept.filter((row) => row.parentKey !== undefined && keys.has(row.parentKey)),
-    (row) => row.parentKey,
+    kept.filter((row) => {
+      const source = lineageKey(row)
+
+      return source !== undefined && keys.has(source)
+    }),
+    (row) => lineageKey(row) ?? row.key,
   )
 
   const compare = comparator(state.ordering)
 
   const top = kept
-    .filter((row) => row.parentKey === undefined || !keys.has(row.parentKey))
+    .filter((row) => {
+      const source = lineageKey(row)
+
+      return source === undefined || !keys.has(source)
+    })
     .toSorted((a, b) => Number(b.open) - Number(a.open) || compare(a, b) || byKey(a, b))
 
   const withChildren = (row: R): R[] => [
@@ -90,6 +100,11 @@ export function sidebarView<R extends SidebarRow>(rows: readonly R[], state: Sid
 }
 
 const ATTENTION: Record<SidebarStatus, number> = { input: 0, failed: 1, unread: 2, running: 3, idle: 4 }
+
+/** Subagents hang off `parentKey` and forks off `forkParentKey`; both read as one lineage. */
+function lineageKey(row: SidebarRow) {
+  return row.parentKey ?? row.forkParentKey
+}
 
 function keptRows<R extends SidebarRow>(rows: readonly R[], state: SidebarViewState) {
   const visible = rows.filter((row) => row.active || isVisible(row, state))
