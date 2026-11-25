@@ -257,6 +257,12 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
 
             const projectNavigation = useProjectNavigation()
 
+            const customizedSidebar = () => {
+              const organize = settings.general.sidebarOrganize()
+
+              return organize === "customize" || organize === "tree"
+            }
+
             const browseProjects = useProjectBrowser()
 
             const projectStart = useProjectStart()
@@ -267,7 +273,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
             createEffect(() => {
               if (
                 settings.appearance.tabLayout() === "vertical" &&
-                settings.general.sidebarOrganize() === "customize" &&
+                customizedSidebar() &&
                 !mobile()
               )
                 return
@@ -381,6 +387,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                 sections={grouped?.sections}
                 tabFooter={grouped?.tabFooter}
                 tabLabel={grouped?.tabLabel}
+                tabDepth={grouped?.tabDepth}
                 tabMenu={grouped?.tabMenu}
                 tabMuted={grouped?.tabMuted}
                 leading={grouped?.leading}
@@ -1028,8 +1035,12 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                                       <Match when={settings.appearance.tabLayout() === "inbox"}>
                                         <SidebarInbox />
                                       </Match>
-                                      <Match when={settings.general.sidebarOrganize() === "customize"}>
-                                        <SidebarCustomized currentTab={currentTab()} onNewSession={openNewTab}>
+                                      <Match when={customizedSidebar()}>
+                                        <SidebarCustomized
+                                          currentTab={currentTab()}
+                                          onNewSession={openNewTab}
+                                          tree={settings.general.sidebarOrganize() === "tree"}
+                                        >
                                           {(grouped) => verticalTabStrip(undefined, undefined, grouped)}
                                         </SidebarCustomized>
                                       </Match>

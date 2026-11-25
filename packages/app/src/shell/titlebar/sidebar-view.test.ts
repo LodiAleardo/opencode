@@ -112,6 +112,21 @@ describe("sidebarView", () => {
     ])
   })
 
+  test("places forks after their source and keeps a fork whose source is filtered out", () => {
+    const rows = [
+      row({ key: "source", status: "idle", order: 1 }),
+      row({ key: "fork-new", open: false, forkParentKey: "source", status: "running", updated: 5 }),
+      row({ key: "fork-old", open: false, forkParentKey: "source", status: "running", updated: 1 }),
+      row({ key: "fork-of-fork", open: false, forkParentKey: "fork-old", status: "running", updated: 2 }),
+      row({ key: "orphan", open: false, forkParentKey: "deleted", status: "running", updated: 0 }),
+    ]
+
+    expect(keys(rows, state())).toEqual(["source", "fork-new", "fork-old", "fork-of-fork", "orphan"])
+
+    const running = state({ filters: { status: ["running"], server: [], project: [] } })
+    expect(keys(rows, running)).toEqual(["fork-new", "fork-old", "fork-of-fork", "orphan"])
+  })
+
   test("keeps an active orphan subagent as a top-level row", () => {
     const rows = [row({ key: "open", order: 0 }), row({ key: "sub", open: false, parentKey: "gone", active: true })]
     expect(keys(rows, state())).toEqual(["open", "sub"])

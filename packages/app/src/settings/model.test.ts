@@ -132,7 +132,7 @@ describe("settings schema", () => {
     })
   })
 
-  test.each(["list", "projects", "customize", "recent", "consolidated"])(
+  test.each(["list", "projects", "customize", "tree", "recent", "consolidated"])(
     "round trips saved side-tab organization %s",
     (mode) => {
       const settings = decode({ general: { sidebarOrganize: mode } })

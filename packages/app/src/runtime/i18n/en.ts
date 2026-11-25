@@ -913,6 +913,7 @@ export const dict = {
   "settings.experimental.sidebarOrganize.recent": "Recent",
   "settings.experimental.sidebarOrganize.list": "One list",
   "settings.experimental.sidebarOrganize.customize": "Customize",
+  "settings.experimental.sidebarOrganize.tree": "Tree view",
   "settings.experimental.sidebarOrganize.consolidated": "Consolidated",
   "settings.general.row.navigation.title": "Navigation",
   "settings.general.row.navigation.description":

@@ -79,6 +79,8 @@ export function TabNavItem(
     shortcut?: number
     /** A faint trailing label, such as the tab's server. */
     label?: string
+    /** How far this row sits below the tab it belongs to. */
+    depth?: number
     /** Hides the project avatar under a header that already names the project; shortcut hints still show. */
     hideAvatar?: boolean
     /** Marks a session whose notifications are muted. */
@@ -447,6 +449,7 @@ export function TabNavItem(
       data-editing={editing()}
       data-avatar={props.hideAvatar ? "hidden" : undefined}
       class="group relative flex h-7 w-full min-w-0 select-none flex-row items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-[6px] px-1.5 [container-type:inline-size]"
+      style={props.depth ? { "--tab-depth-inset": `${props.depth * 14}px` } : undefined}
       classList={{ invisible: props.hidden }}
       data-active={props.active}
       data-status={status()}

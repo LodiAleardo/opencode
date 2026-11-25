@@ -226,7 +226,8 @@
   height: calc(100% + var(--tab-hit-before) + var(--tab-hit-after));
   margin-block-start: calc(-1 * var(--tab-hit-before));
   padding-block: var(--tab-hit-before) var(--tab-hit-after);
-  padding-inline: var(--tab-link-inset);
+  /* Tree view nests a fork's row by widening the start inset. */
+  padding-inline: calc(var(--tab-link-inset) + var(--tab-depth-inset, 0px)) var(--tab-link-inset);
 }
 
 [data-slot="vertical-tabs-sidebar"] [data-titlebar-tab-slot] + [data-titlebar-tab-slot] [data-titlebar-tab] {

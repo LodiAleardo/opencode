@@ -98,13 +98,17 @@ export type SidebarStripGrouping = {
   tabLabel?: (tab: Tab) => string | undefined
   tabMenu?: (tab: SessionTab) => JSX.Element
   tabMuted?: (tab: SessionTab) => boolean
+  /** Tree view only: how far a fork's tab sits below the tab it was forked from. */
+  tabDepth?: (tab: Tab) => number | undefined
   leading?: TabStripLeading
 }
 
-/** The "Customize" vertical sidebar: open tabs and recent sessions from every server, grouped, sorted and filtered. */
+/** The "Customize" vertical sidebar: open tabs and recent sessions from every server, grouped, sorted and filtered.
+ * Tree view lists only the open tabs, the same set as One list, and nests a fork's tab under its origin. */
 export function SidebarCustomized(props: {
   currentTab: Tab | undefined
   onNewSession: () => void
+  tree?: boolean
   children: (strip: SidebarStripGrouping) => JSX.Element
 }) {
   const language = useLanguage()
@@ -229,6 +233,8 @@ export function SidebarCustomized(props: {
         open: true,
         active: isActive(tab.server, tab.sessionId),
         parentKey: undefined,
+        forkParentKey:
+          props.tree && session?.fork ? sessionRowKey(tab.server, session.fork.sessionID) : undefined,
         status: status(ctx, session),
         updated: session?.time.updated ?? 0,
         created: session?.time.created ?? 0,
@@ -241,7 +247,8 @@ export function SidebarCustomized(props: {
 
     const openKeys = new Set(openRows.map((row) => row.key))
 
-    const sessionRows = connected().flatMap((conn, index) => {
+    // Tree view is One list with lineage: only open tabs, no recent history.
+    const sessionRows = (props.tree ? [] : connected()).flatMap((conn, index) => {
       const server = ServerConnection.key(conn)
 
       const ctx = ctxOf(server)
@@ -339,7 +346,8 @@ export function SidebarCustomized(props: {
   }
 
   const depthOf = (row: Row, byKey: Map<string, Row>): number => {
-    const parent = row.parentKey ? byKey.get(row.parentKey) : undefined
+    const source = row.parentKey ?? row.forkParentKey
+    const parent = source ? byKey.get(source) : undefined
 
     return parent ? depthOf(parent, byKey) + 1 : 0
   }
@@ -495,7 +503,7 @@ export function SidebarCustomized(props: {
     ),
   )
 
-  // Row keys of the sessions that render under each open tab (its subagents).
+  // Row keys of the closed sessions that render under an open tab (its subagents and, in tree view, its forks).
   const tabChildren = createMemo(
     () => {
       const out = new Map<string, string[]>()
@@ -508,7 +516,8 @@ export function SidebarCustomized(props: {
           group.rows.forEach((row) => {
             const anchor = anchorOf(row, rowByKey())
 
-            if (anchor !== row && anchor.open) out.set(anchor.key, [...(out.get(anchor.key) ?? []), row.key])
+            // An open row renders as its own tab, so it never also renders as a footer row.
+            if (anchor !== row && anchor.open && !row.open) out.set(anchor.key, [...(out.get(anchor.key) ?? []), row.key])
           })
         })
       })
@@ -537,6 +546,15 @@ export function SidebarCustomized(props: {
     const row = rows().find((item) => item.key === key)
 
     return row ? showLabel(row, groupOf(key)) : undefined
+  }
+
+  // Tree view indents a fork's tab by how far its lineage sits below the tab it was forked from.
+  const tabDepth = (tab: Tab) => {
+    if (!props.tree || tab.type !== "session") return
+
+    const row = rowByKey().get(sessionRowKey(tab.server, tab.sessionId))
+
+    return row ? depthOf(row, rowByKey()) : undefined
   }
 
   function GroupHeader(headerProps: { groupKey: string }) {
@@ -697,7 +715,7 @@ export function SidebarCustomized(props: {
         />
       </div>
       <div class="flex min-h-0 flex-1 flex-col pt-1">
-        {props.children({ sections: sections(), tabFooter, tabLabel })}
+        {props.children({ sections: sections(), tabFooter, tabLabel, tabDepth })}
         <Show when={filterCount() > 0 && !visibleRows().some((row) => !row.active)}>
           <div class="px-2 py-2 text-12-regular text-v2-text-text-faint">
             {language.t("sidebar.view.noMatch")}{" "}

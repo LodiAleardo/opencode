@@ -140,7 +140,7 @@ const generalSchema = Persistence.struct({
   // One side panel open state for every session tab, instead of one per tab.
   sharedSidePanel: Persistence.optional(Schema.Boolean),
   // "projects" is retired; `resolveSidebarOrganize` moves it to its replacement.
-  sidebarOrganize: Schema.Literals(["projects", "list", "customize", "recent", "consolidated"]),
+  sidebarOrganize: Schema.Literals(["projects", "list", "customize", "tree", "recent", "consolidated"]),
   mobileTitlebarPosition: Schema.Literals(["top", "bottom"]),
   // Owned by the review plugin, which copies it out once; kept so settings rewrites cannot drop it first.
   mobileDiffWrap: Persistence.optional(Schema.Boolean),
@@ -366,8 +366,8 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     const prototypes = recentSessionsAvailable(usePlatform().platform, import.meta.env.VITE_OPENCODE_CHANNEL)
 
     const sidebarOrganizeOptions: SidebarOrganize[] = prototypes
-      ? ["list", "customize", "recent", "consolidated"]
-      : ["list", "customize"]
+      ? ["list", "customize", "tree", "recent", "consolidated"]
+      : ["list", "customize", "tree"]
 
     const sidebarOrganize = createMemo(() =>
       resolveSidebarOrganize(store.general?.sidebarOrganize, sidebarOrganizeOptions),

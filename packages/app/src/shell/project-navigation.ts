@@ -16,6 +16,6 @@ export function useProjectNavigation() {
     if (mobile() || settings.appearance.tabLayout() !== "vertical" || settings.appearance.navigationPrototype())
       return false
 
-    return settings.general.sidebarOrganize() === "customize"
+    return settings.general.sidebarOrganize() === "customize" || settings.general.sidebarOrganize() === "tree"
   }
 }

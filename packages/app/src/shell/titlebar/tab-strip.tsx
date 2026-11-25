@@ -81,6 +81,7 @@ function SessionTabSlot(
     group?: string
     footer?: JSX.Element
     label?: string
+    depth?: number
     hideAvatar?: boolean
     active: boolean
     orientation: "horizontal" | "vertical"
@@ -162,6 +163,7 @@ function SessionTabSlot(
         loading={props.loading}
         shortcut={props.shortcut}
         label={props.label}
+        depth={props.depth}
         hideAvatar={props.hideAvatar}
         fallbackTitle={props.fallbackTitle}
         fallbackDirectory={props.fallbackDirectory}
@@ -191,6 +193,7 @@ function SessionTabEntry(
     group?: string
     footer?: JSX.Element
     label?: string
+    depth?: number
     hideAvatar?: boolean
     active: boolean
     highlightActive?: boolean
@@ -335,6 +338,7 @@ function SessionTabEntry(
         group={props.group}
         footer={props.footer}
         label={props.label}
+        depth={props.depth}
         hideAvatar={props.hideAvatar}
         active={props.active && props.highlightActive !== false}
         orientation={props.orientation}
@@ -668,6 +672,8 @@ export function TitlebarTabStrip(props: {
   tabFooter?: (tab: Tab) => JSX.Element | undefined
   /** Vertical only: a faint trailing label on a tab row (e.g. its server). */
   tabLabel?: (tab: Tab) => string | undefined
+  /** Vertical only: how far a tab row sits below the tab it belongs to. */
+  tabDepth?: (tab: Tab) => number | undefined
   /** Vertical only: menu items shown above a session tab's own. */
   tabMenu?: (tab: SessionTab) => JSX.Element
   /** Vertical only: whether a session tab is muted, which swaps its unread dot for a muted mark. */
@@ -905,6 +911,8 @@ export function TitlebarTabStrip(props: {
 
     const label = () => (vertical() ? props.tabLabel?.(tab) : undefined)
 
+    const depth = () => (vertical() ? props.tabDepth?.(tab) : undefined)
+
     if (tab.type === "session") {
       return (
         <SessionTabEntry
@@ -915,6 +923,7 @@ export function TitlebarTabStrip(props: {
           group={group}
           footer={footer()}
           label={label()}
+          depth={depth()}
           hideAvatar={section?.hideAvatars}
           active={props.currentTab === tab}
           highlightActive={props.highlightActive}
